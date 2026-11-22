@@ -422,4 +422,34 @@ describe('lib/config', function() {
     assert.equal(config.accounts[1].bluesky.password, 'm')
     assert.deepEqual(config.disabledAccounts, [])
   })
+
+  // These two load the repo's real config.base.json, not a temp copy.
+  const repoRoot = path.join(__dirname, '..')
+
+  it('the repo config.base.json loads with the Miami secret set', function() {
+    sinon.stub(console, 'error')
+
+    const config = loadConfig({
+      baseDir: repoRoot,
+      env: { SFEDITS_MIAMI_BLUESKY_PASSWORD: 'x' }
+    })
+    assert.equal(config.accounts.length, 2)
+    assert.equal(config.accounts[1].id, 'miami')
+    assert.equal(config.accounts[1].bluesky.identifier, 'mia-wiki-top500.bsky.social')
+    assert.equal(config.accounts[1].bluesky.password, 'x')
+    assert.notProperty(config.accounts[1], 'discord')
+    assert.notProperty(config.accounts[1], 'mastodon')
+    assert.notProperty(config.accounts[1], 'wikidata_claims')
+    assert.deepEqual(config.disabledAccounts, [])
+  })
+
+  it('the repo config.base.json without the Miami secret disables Miami and keeps SF', function() {
+    sinon.stub(console, 'error')
+
+    const config = loadConfig({ baseDir: repoRoot, env: {} })
+    assert.equal(config.accounts.length, 1)
+    assert.equal(config.accounts[0].id, undefined)
+    assert.equal(config.accounts[0].bluesky.identifier, 'top500.thebay.wiki')
+    assert.equal(config.disabledAccounts[0].id, 'miami')
+  })
 })
