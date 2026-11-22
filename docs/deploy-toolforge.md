@@ -126,6 +126,14 @@ toolforge envvars create SFEDITS_INVITE_CODES              # comma-separated cod
 required only if their corresponding stanzas are added to `config.base.json`.
 `SFEDITS_DISCORD_WEBHOOK_URL` and `SFEDITS_INVITE_CODES` are always needed.
 
+**Accounts after the first** use prefixed names instead: each one needs an
+`id` in `config.base.json`, and its secrets are
+`SFEDITS_<ID>_BLUESKY_PASSWORD` / `SFEDITS_<ID>_MASTODON_ACCESS_TOKEN` /
+`SFEDITS_<ID>_DISCORD_WEBHOOK_URL` (`<ID>` is the id in upper case). A
+problem in such an account (a missing secret, or a bad or duplicate id)
+disables only that account; the bot logs
+`[config] account "<id>" disabled: …` at startup and keeps running.
+
 Confirm afterwards with `toolforge envvars list` (it shows names, not values).
 
 ### The substantive-edit filter (`substantive_only`)

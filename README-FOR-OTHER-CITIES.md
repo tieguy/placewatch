@@ -220,9 +220,13 @@ The bot runs on [Toolforge](https://toolforge.org). The steps are in
 | Where | What to change |
 |---|---|
 | `config.base.json` | `nick`; the post `template`; `watchlist_source`; `mastodon.instance`; `bluesky.identifier`; `wikidata_claims`; `topic_store.database` |
-| Toolforge environment variables | `SFEDITS_DISCORD_WEBHOOK_URL`, `SFEDITS_BLUESKY_PASSWORD`, `SFEDITS_MASTODON_ACCESS_TOKEN`, `SFEDITS_INVITE_CODES` (set with `toolforge envvars create`) |
+| Toolforge environment variables | `SFEDITS_DISCORD_WEBHOOK_URL`, `SFEDITS_BLUESKY_PASSWORD`, `SFEDITS_MASTODON_ACCESS_TOKEN`, `SFEDITS_INVITE_CODES` (set with `toolforge envvars create`); the first account uses these unprefixed names — each further account needs an `id`, and its secrets are `SFEDITS_<ID>_BLUESKY_PASSWORD` / `_MASTODON_ACCESS_TOKEN` / `_DISCORD_WEBHOOK_URL` |
 | `toolforge-jobs.yaml` | the tool name `san-francisco-edit-stream` in each `image:` line |
 | `lib/wikidata-claim-watch.js` | `BAY_AREA_COUNTIES`, if you use the Wikidata claim-change alerts |
+
+A problem confined to a further account (a missing secret, or a bad or
+duplicate `id`) disables only that account: the bot logs
+`[config] account "<id>" disabled: …` at startup and keeps running.
 
 Run `node page-watch.js --noop --verbose` first. It watches live edits and
 prints what it would post, without posting anything.

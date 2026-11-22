@@ -1,5 +1,6 @@
 const { describe, it, beforeEach, afterEach } = require('mocha')
 const { assert } = require('chai')
+const sinon = require('sinon')
 const fs = require('fs')
 const os = require('os')
 const path = require('path')
@@ -13,6 +14,7 @@ describe('lib/config', function() {
   })
 
   afterEach(function() {
+    sinon.restore()
     fs.rmSync(dir, { recursive: true, force: true })
   })
 
@@ -301,5 +303,123 @@ describe('lib/config', function() {
 
     const config = loadConfig({ baseDir: dir, env: {} })
     assert.equal(config.accounts[0].pii_blocking.enabled, false)
+  })
+
+  const two = (miami = { id: 'miami', bluesky: { identifier: 'mia.bsky.social' }, deliveries: [{ type: 'bluesky' }] }) =>
+    ({ accounts: [{ bluesky: { identifier: 'sf.bsky.social' }, deliveries: [{ type: 'bluesky' }] }, miami] })
+
+  it('SFEDITS_MIAMI_BLUESKY_PASSWORD lands on the account with id "miami"', function() {
+    fs.writeFileSync(path.join(dir, 'config.base.json'), JSON.stringify(two()))
+
+    const config = loadConfig({ baseDir: dir, env: { SFEDITS_MIAMI_BLUESKY_PASSWORD: 'm', SFEDITS_BLUESKY_PASSWORD: 's' } })
+    assert.equal(config.accounts[1].bluesky.password, 'm')
+    assert.equal(config.accounts[0].bluesky.password, 's')
+    assert.deepEqual(config.disabledAccounts, [])
+  })
+
+  it('a second account without an id is disabled, not fatal', function() {
+    fs.writeFileSync(path.join(dir, 'config.base.json'), JSON.stringify(two({ bluesky: { identifier: 'x' } })))
+    sinon.stub(console, 'error')
+
+    const config = loadConfig({ baseDir: dir, env: {} })
+    assert.equal(config.accounts.length, 1)
+    assert.equal(config.disabledAccounts[0].id, null)
+    assert.equal(config.disabledAccounts[0].index, 1)
+    assert.match(config.disabledAccounts[0].reason, /needs an "id"/)
+  })
+
+  it('malformed and duplicate ids disable the account', function() {
+    sinon.stub(console, 'error')
+
+    fs.writeFileSync(path.join(dir, 'config.base.json'), JSON.stringify(
+      two({ id: 'Miami', bluesky: { identifier: 'x', password: 'inline' }, deliveries: [{ type: 'bluesky' }] })
+    ))
+    let config = loadConfig({ baseDir: dir, env: {} })
+    assert.equal(config.accounts.length, 1)
+    assert.equal(config.disabledAccounts[0].id, 'Miami')
+    assert.match(config.disabledAccounts[0].reason, /must match/)
+
+    fs.writeFileSync(path.join(dir, 'config.base.json'), JSON.stringify(
+      two({ id: 'mia-mi', bluesky: { identifier: 'x', password: 'inline' }, deliveries: [{ type: 'bluesky' }] })
+    ))
+    config = loadConfig({ baseDir: dir, env: {} })
+    assert.equal(config.accounts.length, 1)
+    assert.equal(config.disabledAccounts[0].id, 'mia-mi')
+    assert.match(config.disabledAccounts[0].reason, /must match/)
+
+    const first = { id: 'miami', bluesky: { identifier: 'a.bsky.social', password: 'inline' }, deliveries: [{ type: 'bluesky' }] }
+    const third = { id: 'miami', bluesky: { identifier: 'b.bsky.social', password: 'inline' }, deliveries: [{ type: 'bluesky' }] }
+    fs.writeFileSync(path.join(dir, 'config.base.json'), JSON.stringify({
+      accounts: [{ bluesky: { identifier: 'sf.bsky.social' }, deliveries: [{ type: 'bluesky' }] }, first, third]
+    }))
+    config = loadConfig({ baseDir: dir, env: {} })
+    assert.equal(config.accounts.length, 2)
+    assert.equal(config.accounts[1].id, 'miami')
+    assert.equal(config.disabledAccounts[0].id, 'miami')
+    assert.equal(config.disabledAccounts[0].index, 2)
+    assert.match(config.disabledAccounts[0].reason, /duplicate account id "miami"/)
+    assert.equal(console.error.callCount, 3)
+  })
+
+  it('a prefixed secret with no matching account is a warning, not an error', function() {
+    fs.writeFileSync(path.join(dir, 'config.base.json'), JSON.stringify({
+      accounts: [{ bluesky: { identifier: 'sf.bsky.social' } }]
+    }))
+    const error = sinon.stub(console, 'error')
+
+    const config = loadConfig({ baseDir: dir, env: { SFEDITS_MIAMI_BLUESKY_PASSWORD: 'm' } })
+    assert.deepEqual(config.disabledAccounts, [])
+    assert.equal(error.callCount, 1)
+    assert.match(error.getCall(0).args[0], /SFEDITS_MIAMI_BLUESKY_PASSWORD is set but no account has id "miami"/)
+  })
+
+  it('a prefixed secret whose account lacks the stanza disables that account', function() {
+    fs.writeFileSync(path.join(dir, 'config.base.json'), JSON.stringify(
+      two({ id: 'miami', discord: {}, deliveries: [{ type: 'discord' }] })
+    ))
+    sinon.stub(console, 'error')
+
+    const config = loadConfig({ baseDir: dir, env: { SFEDITS_MIAMI_BLUESKY_PASSWORD: 'm' } })
+    assert.equal(config.accounts.length, 1)
+    assert.equal(config.disabledAccounts[0].id, 'miami')
+    assert.match(config.disabledAccounts[0].reason, /SFEDITS_MIAMI_BLUESKY_PASSWORD is set but the config has no stanza for it/)
+  })
+
+  it('a second account whose delivery has no secret is disabled, and the first account still loads', function() {
+    fs.writeFileSync(path.join(dir, 'config.base.json'), JSON.stringify(two()))
+    const error = sinon.stub(console, 'error')
+
+    const config = loadConfig({ baseDir: dir, env: {} })
+    assert.equal(config.accounts.length, 1)
+    assert.equal(config.accounts[0].bluesky.identifier, 'sf.bsky.social')
+    assert.equal(config.disabledAccounts[0].id, 'miami')
+    assert.equal(config.disabledAccounts[0].index, 1)
+    assert.match(config.disabledAccounts[0].reason, /delivers to bluesky but SFEDITS_MIAMI_BLUESKY_PASSWORD is not set/)
+    assert.equal(error.callCount, 1)
+    assert.match(error.getCall(0).args[0], /\[config\] account "miami" disabled: .*Other accounts continue\./)
+  })
+
+  it('an inline secret satisfies the second account', function() {
+    fs.writeFileSync(path.join(dir, 'config.base.json'), JSON.stringify(
+      two({ id: 'miami', bluesky: { identifier: 'x', password: 'inline' }, deliveries: [{ type: 'bluesky' }] })
+    ))
+    const error = sinon.stub(console, 'error')
+
+    const config = loadConfig({ baseDir: dir, env: {} })
+    assert.equal(config.accounts.length, 2)
+    assert.equal(config.accounts[1].bluesky.password, 'inline')
+    assert.deepEqual(config.disabledAccounts, [])
+    assert.equal(error.callCount, 0)
+  })
+
+  it('accounts[0] without its secrets still loads (SF unchanged)', function() {
+    fs.writeFileSync(path.join(dir, 'config.base.json'), JSON.stringify(two()))
+    sinon.stub(console, 'error')
+
+    const config = loadConfig({ baseDir: dir, env: { SFEDITS_MIAMI_BLUESKY_PASSWORD: 'm' } })
+    assert.equal(config.accounts.length, 2)
+    assert.equal(config.accounts[0].bluesky.password, undefined)
+    assert.equal(config.accounts[1].bluesky.password, 'm')
+    assert.deepEqual(config.disabledAccounts, [])
   })
 })
