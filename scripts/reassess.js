@@ -893,8 +893,8 @@ const STAGES = {
   links: () => stageLinks(requireCache('cohort')),
   'links-prose': () => stageLinksProse(requireCache('cohort')),
   'links-prose-all': () => stageLinksProseAll(
-    buildUniverse(requireCache('cohort'), loadCache('untagged-candidates'))),
-  redirects: () => stageRedirects(redirectTargets(requireCache('cohort'), loadCache('untagged-candidates'))),
+    buildUniverse(requireCache('cohort'), candidatesForCrawl())),
+  redirects: () => stageRedirects(redirectTargets(requireCache('cohort'), candidatesForCrawl())),
   claims: () => stageClaims(requireCache('qids')),
   assessments: () => stageAssessments(requireCache('cohort')),
   leads: () => stageLeads(requireCache('cohort')),
@@ -907,6 +907,24 @@ function requireCache(stage) {
   const data = loadCache(stage)
   if (!data) throw new Error(`stage "${stage}" has not run yet`)
   return data
+}
+
+/**
+ * The untagged-candidates cache for the stages whose crawl should cover it:
+ * links-prose-all and redirects build their title set from it. A missing
+ * cache does not stop them - they silently crawl only the tagged cohort and
+ * then cache that partial result as if it were complete, which is exactly
+ * the under-tagging bias the methodology warns about. So warn, loudly, but
+ * keep going: `all` on a fresh sfba region has no candidates cache yet and
+ * must still work.
+ */
+function candidatesForCrawl() {
+  const candidates = loadCache('untagged-candidates')
+  if (!candidates) {
+    console.error(`[reassess] WARNING: untagged-candidates cache missing; crawling the tagged cohort only. ` +
+      `Run "node scripts/reassess-untagged.js --region ${region().name} candidates" first for the full universe.`)
+  }
+  return candidates
 }
 
 /**
@@ -984,5 +1002,5 @@ module.exports = {
   percentileRanks, median, leadScore, scoreCohort, pickCandidates, wikitextLinks,
   canonicalInlinks, redirectTargets, buildUniverse, assignTiers, IS_HERE_PROPERTIES,
   fetchPageviews, setRegion, region, parseCli, loadTargets, noClaimTargetsSkip,
-  api, batches, WD_API
+  api, batches, WD_API, STAGES
 }

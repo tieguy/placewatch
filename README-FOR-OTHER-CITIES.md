@@ -192,11 +192,22 @@ Top and High lists before you launch.
      stage counts statements against. Leave it `null` if you do not have
      one; the claims stage then refuses to run, and `all` skips it with a
      log line.
-2. Run each command with `--region <name>`: `node scripts/reassess.js
-   --region <name> all`, then `node scripts/reassess-untagged.js --region
-   <name> all`, then `node scripts/rank.js --region <name> --watchlist 500
-   --wide 2500`. The link crawl reads every article in the universe, so
-   expect it to take a while.
+
+   The lead gate and `lead_exclusions` affect only the reassessment
+   report, not the ranking (`rank.js` does not apply the gate).
+   `exclude_titles` removes an article from the ranking, but links from
+   that article still count toward others.
+2. Run each command with `--region <name>`, in this order: `node
+   scripts/reassess.js --region <name> cohort`, then `node
+   scripts/reassess-untagged.js --region <name> candidates`, then `node
+   scripts/reassess.js --region <name> links-prose-all`, then `node
+   scripts/reassess.js --region <name> redirects`, then `node
+   scripts/rank.js --region <name> --watchlist 500 --wide 2500`. The order
+   matters: `links-prose-all` and `redirects` build their title set from
+   the `untagged-candidates` cache, so if they run before `candidates`
+   they crawl only the tagged articles - and cache that partial result.
+   Both stages print a warning when the cache is missing. The link crawl
+   reads every article in the universe, so expect it to take a while.
 3. Caches live in `data/reassess/<name>/`, one file per stage: delete a
    file to force a re-fetch, and an interrupted run resumes. Old flat
    caches in `data/reassess/` are ignored: move them into

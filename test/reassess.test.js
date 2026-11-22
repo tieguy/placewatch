@@ -1,12 +1,13 @@
 const fs = require('fs')
 const path = require('path')
 const { spawnSync } = require('child_process')
+const sinon = require('sinon')
 const { assert } = require('chai')
 
 const {
   percentileRanks, median, leadScore, scoreCohort, pickCandidates,
   wikitextLinks, canonicalInlinks, redirectTargets, buildUniverse, assignTiers,
-  setRegion, region, parseCli, loadTargets
+  setRegion, region, parseCli, loadTargets, STAGES
 } = require('../scripts/reassess')
 const { loadProfile, leadMatcher } = require('../scripts/region-profile')
 
@@ -149,6 +150,41 @@ describe('reassess', function() {
       assert.match(out.stderr,
         /region "miami" has no claim_targets; the claims stage needs them/)
     })
+  })
+
+  describe('links-prose-all and redirects without untagged-candidates', function() {
+    // A region whose cache dir holds only a cohort: no candidates cache.
+    // The cohort is empty so both stages finish with zero batches and no
+    // network - the warning is the only behaviour under test.
+    const FIXTURE = {
+      name: 'warn-fixture', label: 'Warn', wikiproject: 'Warn',
+      wiki_api: 'x', anchors: [], untagged_properties: [],
+      lead_terms: ['Warn'], lead_exclusions: [], live_importance: []
+    }
+
+    beforeEach(function() { setRegion(FIXTURE) })
+    afterEach(function() {
+      fs.rmSync(region().dataDir, { recursive: true, force: true })
+      setRegion(loadProfile('sfba'))
+    })
+
+    for (const stage of ['links-prose-all', 'redirects']) {
+      it(`${stage} warns that it is crawling the tagged cohort only`, async function() {
+        fs.mkdirSync(region().dataDir, { recursive: true })
+        fs.writeFileSync(path.join(region().dataDir, 'cohort.json'), '[]')
+        const error = sinon.stub(console, 'error')
+        try {
+          await STAGES[stage]()
+          assert.equal(error.callCount, 1)
+          assert.include(error.getCall(0).args[0],
+            '[reassess] WARNING: untagged-candidates cache missing; crawling the tagged cohort only.')
+          assert.include(error.getCall(0).args[0],
+            'Run "node scripts/reassess-untagged.js --region warn-fixture candidates" first for the full universe.')
+        } finally {
+          error.restore()
+        }
+      })
+    }
   })
 
   describe('wikitextLinks', function() {

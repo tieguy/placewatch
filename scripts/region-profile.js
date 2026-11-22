@@ -5,8 +5,9 @@
  * second region can run the same pipeline without forking it.
  *
  * This module owns loading and the lead-term regexes. The reassess scripts
- * still carry their in-file constants; wiring them to profiles is the next
- * task, and until then nothing here is on their path.
+ * load their region through setRegion(loadProfile(<name>)) at startup, and
+ * rank.js takes a profile directly, so every per-region constant they use
+ * comes from a profile file under regions/.
  */
 
 const fs = require('fs')
@@ -21,6 +22,12 @@ const NAME = /^[a-z][a-z0-9-]*$/
 const REQUIRED_FIELDS = [
   'name', 'label', 'wikiproject', 'wiki_api', 'anchors',
   'untagged_properties', 'lead_terms', 'lead_exclusions', 'live_importance'
+]
+
+/** Required fields that must be lists of values, not single values. */
+const LIST_FIELDS = [
+  'anchors', 'untagged_properties', 'lead_terms', 'lead_exclusions',
+  'live_importance'
 ]
 
 /**
@@ -40,7 +47,9 @@ function escapeRegExp(term) {
  * @param {string} [options.dir] - profile directory, defaults to <repo>/regions
  * @returns {Object} the profile, with claim_targets (null) and exclude_titles
  *   ([]) defaulted when absent
- * @throws {Error} on an invalid or unknown name, or a missing required field
+ * @throws {Error} on an invalid or unknown name, a name field that does not
+ *   match the filename, a missing or non-list required field, or an empty
+ *   lead_terms list
  */
 function loadProfile(name, { dir = DEFAULT_DIR } = {}) {
   if (typeof name !== 'string' || !NAME.test(name)) {
@@ -53,10 +62,26 @@ function loadProfile(name, { dir = DEFAULT_DIR } = {}) {
   }
 
   const profile = JSON.parse(fs.readFileSync(file, 'utf8'))
+  // The name picks the cache directory (data/reassess/<name>/), so a stale
+  // name copied along with the file would read and overwrite ANOTHER region's
+  // caches, silently. Catch it at load time.
+  if (profile.name !== name) {
+    throw new Error(`region profile "${name}" has name "${profile.name}" - the name field must match the filename`)
+  }
   for (const field of REQUIRED_FIELDS) {
-    if (profile[field] === undefined) {
+    // JSON null reads as "the field is absent", not as a value that satisfies
+    if (profile[field] === undefined || profile[field] === null) {
       throw new Error(`region profile "${name}" is missing "${field}"`)
     }
+  }
+  for (const field of LIST_FIELDS) {
+    if (!Array.isArray(profile[field])) {
+      throw new Error(`region profile "${name}" field "${field}" must be an array`)
+    }
+  }
+  if (profile.lead_terms.length === 0) {
+    // leadMatcher would join zero terms into a match-everything regex.
+    throw new Error(`region profile "${name}" has empty "lead_terms" - every lead would match`)
   }
 
   return {
