@@ -472,14 +472,16 @@ async function sendStatus(account, statusData, edit, topicIds = [], thread = nul
 
 const DEFAULT_COLLAPSE_TEMPLATE = '{{{page}}} Wikipedia article edited {{count}} times by {{{name}}} {{&url}}'
 
-async function postEdit(account, edit, count, thread) {
+async function postEdit(account, edit, count, thread, { topics = true } = {}) {
   const template = count > 1
     ? (account.collapse && account.collapse.template) || DEFAULT_COLLAPSE_TEMPLATE
     : account.template
   const statusData = getStatus(edit, edit.user, template)
   // Topic membership is recomputed at post time: for a combined edit the
   // page is unchanged, and this picks up index refreshes during the window.
-  const topicIds = topicIndex ? topicIndex.topicsForEdit(edit) : []
+  // topics: false marks a pass that must not carry subscriptions (the
+  // non-first accounts in dispatchEdit), so the duplicate posts never happen.
+  const topicIds = topics && topicIndex ? topicIndex.topicsForEdit(edit) : []
   try {
     return await sendStatus(account, statusData, edit, topicIds, thread)
   } catch (error) {
@@ -492,7 +494,7 @@ async function postEdit(account, edit, count, thread) {
 // with ad-hoc account objects.
 const collapsers = new Map()
 
-function getCollapser(account) {
+function getCollapser(account, { topics = true } = {}) {
   let collapser = collapsers.get(account)
   if (!collapser) {
     const cfg = account.collapse || {}
@@ -505,7 +507,7 @@ function getCollapser(account) {
         }
         // Returns post refs so follow-up posts in the burst thread under
         // the first one; postEdit resolves to null on failure/block.
-        return postEdit(account, edit, count, thread)
+        return postEdit(account, edit, count, thread, { topics })
       }
     })
     collapsers.set(account, collapser)
@@ -513,7 +515,7 @@ function getCollapser(account) {
   return collapser
 }
 
-async function inspect(account, edit) {
+async function inspect(account, edit, { topics = true } = {}) {
   // Wikidata edits are claim-watched (statement-level semantics), not
   // page-watched; only accounts with a wikidata_claims stanza divert here
   if (edit.wikipedia === 'Wikidata' && account.claimWatch) {
@@ -528,21 +530,44 @@ async function inspect(account, edit) {
     // Two independent membership sources. The legacy PageAssessments
     // watchlist is what the SFBA bot runs on and is deliberately left
     // untouched; the topic index is the new platform path. An edit matching
-    // both is rendered once and delivered to both.
+    // both is rendered once and delivered to both. dispatchEdit sends only
+    // the first account's pass with topics, so subscriptions are resolved
+    // (and delivered) once per edit, not once per account.
     const watched = isWatched(account, edit)
-    const topicIds = topicIndex ? topicIndex.topicsForEdit(edit) : []
+    const topicIds = topics && topicIndex ? topicIndex.topicsForEdit(edit) : []
 
     if (watched || topicIds.length > 0) {
       if (account.collapse && account.collapse.enabled === false) {
-        await postEdit(account, edit, 1, null)
+        await postEdit(account, edit, 1, null, { topics })
       } else {
-        const result = getCollapser(account).add(edit)
+        const result = getCollapser(account, { topics }).add(edit)
         if (result.action === 'buffered') {
           console.log(`Buffered edit to "${edit.page}" by ${edit.user} (${result.pending} pending in collapse window)`)
         }
       }
     }
   }
+}
+
+/**
+ * Run every account's inspect pass for one edit.
+ *
+ * Topic subscriptions ride only the first account's pass. Every account
+ * used to resolve the edit's topics, so with two accounts each subscriber
+ * got the same post twice. SF is accounts[0] and keeps carrying them, so
+ * the single-account deployment behaves exactly as before.
+ *
+ * Each account's error is caught and logged separately (as the stream
+ * listener always did), so one broken account cannot silence the others.
+ *
+ * @param {Array<Object>} accounts - Account configs
+ * @param {Object} edit - Edit from the stream
+ * @returns {Promise<void>} Resolves when every account's pass has settled
+ */
+async function dispatchEdit(accounts, edit) {
+  await Promise.all(Array.from(accounts).map((account, i) =>
+    inspect(account, edit, { topics: i === 0 })
+      .catch(error => console.error('Inspect error:', error))))
 }
 
 function checkConfig(config, error) {
@@ -646,9 +671,7 @@ async function main() {
         if (argv.verbose) {
           console.log(JSON.stringify(edit))
         }
-        Array.from(config.accounts).forEach((account) => {
-          inspect(account, edit).catch(error => console.error('Inspect error:', error))
-        })
+        dispatchEdit(config.accounts, edit)
       })
     } else {
       return console.log(err)
@@ -692,7 +715,8 @@ module.exports = {
   buildFacets,
   inspect,
   postEdit,
-  sendStatus
+  sendStatus,
+  dispatchEdit
 }
 module.exports.deliverToTopics = deliverToTopics
 module.exports._setTopicStateForTest = (store, index) => {

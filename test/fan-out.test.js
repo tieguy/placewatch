@@ -35,6 +35,10 @@ describe('fan-out', function() {
       './lib/diff-image': {
         captureDiffImage: async () => {
           renderCount++
+          // sendStatus deletes the screenshot in its finally block, and the
+          // dispatchEdit tests render once per account concurrently, so put
+          // the file back on every render (a real render creates it too).
+          fs.writeFileSync(screenshotPath, 'fake png bytes')
           // summary must be an object or null, never a string: the embed
           // builder does summary.sentence.charAt(0) in
           // lib/discord-platform.js, and a truthy string sends every
@@ -232,6 +236,163 @@ describe('fan-out', function() {
     assert.lengthOf(recordedPosts, 2, 'each successful sendStatus records one entry')
     assert.equal(recordedPosts[0].account, 'miami')
     assert.isNull(recordedPosts[1].account)
+  })
+
+  describe('dispatchEdit across accounts', function() {
+    // Task 3: each topic subscriber gets one post per edit, no matter how
+    // many accounts run. Topic subscriptions ride only the first account's
+    // pass (SF, accounts[0]); later accounts carry watchlist-only passes.
+    // collapse is disabled on both accounts so no timers run.
+
+    function sfAccount(watchedPages) {
+      const watchlist = {}
+      for (const page of watchedPages) {
+        watchlist[page] = true
+      }
+      return {
+        // SF is accounts[0] and carries no id (Task 1)
+        discord: { webhook_url: 'https://discord.com/api/webhooks/13/sf' },
+        deliveries: [{ type: 'discord' }],
+        watchlist: { 'English Wikipedia': watchlist },
+        template: '{{page}} edited',
+        collapse: { enabled: false }
+      }
+    }
+
+    function miamiAccount(watchedPages) {
+      return {
+        id: 'miami',
+        discord: { webhook_url: 'https://discord.com/api/webhooks/12/miami' },
+        deliveries: [{ type: 'discord' }],
+        // The shape watchlist_source fills (lib/watchlist-sync.js:279-284)
+        dynamicWatchlist: { 'English Wikipedia': new Set(watchedPages) },
+        template: '{{page}} edited',
+        collapse: { enabled: false }
+      }
+    }
+
+    function editTo(page) {
+      return {
+        wikipedia: 'English Wikipedia',
+        page,
+        user: 'Editor',
+        url: 'https://en.wikipedia.org/w/index.php?diff=123&oldid=456'
+      }
+    }
+
+    // The page-verification fetch sendStatus does before rendering.
+    function verifyDiff(page) {
+      nock('https://en.wikipedia.org')
+        .get('/w/index.php')
+        .query(true)
+        .reply(200, `<script>RLCONF={"wgPageName":"${page.replace(/ /g, '_')}"};</script>`)
+    }
+
+    it('a topic edit reaches each subscriber once with two accounts', async function() {
+      // Neither account watches this page; only the topic matches it.
+      // Before dispatchEdit, every account's pass resolved the edit's
+      // topics, so a subscriber got the same post once per account.
+      let subPostCount = 0
+      nock('https://discord.com')
+        .post('/api/webhooks/1/sub')
+        .query(true)
+        // Allow the duplicate a bug would send, so the counter sees it
+        // instead of nock erroring on the second POST.
+        .times(2)
+        .reply(() => {
+          subPostCount++
+          return [200, { id: '1' }]
+        })
+
+      const pageWatch = loadPageWatch()
+      pageWatch._setTopicStateForTest(
+        { subscriptionsForTopic: async () => [subscription(1, '/api/webhooks/1/sub')] },
+        { topicsForEdit: () => [1] })
+
+      verifyDiff('Ocean Drive')
+      await pageWatch.dispatchEdit([sfAccount([]), miamiAccount([])], editTo('Ocean Drive'))
+
+      assert.equal(subPostCount, 1,
+        'with two accounts a topic subscriber must still get exactly one post')
+    })
+
+    it('an SF-only edit reaches only SF\'s delivery', async function() {
+      const sfHook = nock('https://discord.com')
+        .post('/api/webhooks/13/sf').query(true).reply(200, { id: '10' })
+      const miamiHook = nock('https://discord.com')
+        .post('/api/webhooks/12/miami').query(true).reply(200, { id: '9' })
+
+      const pageWatch = loadPageWatch()
+      pageWatch._setTopicStateForTest(
+        { subscriptionsForTopic: async () => [subscription(1, '/api/webhooks/1/sub')] },
+        { topicsForEdit: () => [] })
+
+      verifyDiff('Golden Gate Park')
+      await pageWatch.dispatchEdit(
+        [sfAccount(['Golden Gate Park']), miamiAccount([])], editTo('Golden Gate Park'))
+
+      assert.isTrue(sfHook.isDone(), 'SF watches this page and must post')
+      assert.isFalse(miamiHook.isDone(), 'Miami does not watch this page and must not post')
+    })
+
+    it('a Miami-only edit reaches only Miami\'s delivery', async function() {
+      const sfHook = nock('https://discord.com')
+        .post('/api/webhooks/13/sf').query(true).reply(200, { id: '10' })
+      const miamiHook = nock('https://discord.com')
+        .post('/api/webhooks/12/miami').query(true).reply(200, { id: '9' })
+
+      const pageWatch = loadPageWatch()
+      pageWatch._setTopicStateForTest(
+        { subscriptionsForTopic: async () => [subscription(1, '/api/webhooks/1/sub')] },
+        { topicsForEdit: () => [] })
+
+      verifyDiff('Little Havana')
+      await pageWatch.dispatchEdit(
+        [sfAccount([]), miamiAccount(['Little Havana'])], editTo('Little Havana'))
+
+      assert.isTrue(miamiHook.isDone(), 'Miami watches this page and must post')
+      assert.isFalse(sfHook.isDone(), 'SF does not watch this page and must not post')
+    })
+
+    it('an edit both accounts watch reaches both accounts', async function() {
+      const sfHook = nock('https://discord.com')
+        .post('/api/webhooks/13/sf').query(true).reply(200, { id: '10' })
+      const miamiHook = nock('https://discord.com')
+        .post('/api/webhooks/12/miami').query(true).reply(200, { id: '9' })
+
+      const pageWatch = loadPageWatch()
+      pageWatch._setTopicStateForTest(
+        { subscriptionsForTopic: async () => [subscription(1, '/api/webhooks/1/sub')] },
+        { topicsForEdit: () => [] })
+
+      verifyDiff('Little Havana')
+      await pageWatch.dispatchEdit(
+        [sfAccount(['Little Havana']), miamiAccount(['Little Havana'])],
+        editTo('Little Havana'))
+
+      assert.isTrue(sfHook.isDone(), 'SF watches this page and must post')
+      assert.isTrue(miamiHook.isDone(), 'Miami watches this page and must post')
+    })
+
+    it('a failing Miami delivery does not stop SF\'s delivery', async function() {
+      const sfHook = nock('https://discord.com')
+        .post('/api/webhooks/13/sf').query(true).reply(200, { id: '10' })
+      nock('https://discord.com')
+        .post('/api/webhooks/12/miami').query(true).reply(500, 'gone')
+
+      const pageWatch = loadPageWatch()
+      pageWatch._setTopicStateForTest(
+        { subscriptionsForTopic: async () => [subscription(1, '/api/webhooks/1/sub')] },
+        { topicsForEdit: () => [] })
+
+      verifyDiff('Little Havana')
+      await pageWatch.dispatchEdit(
+        [sfAccount(['Little Havana']), miamiAccount(['Little Havana'])],
+        editTo('Little Havana'))
+
+      assert.isTrue(sfHook.isDone(),
+        'a failing account delivery must not stop the other account\'s delivery')
+    })
   })
 
   it('skips rendering when no topic matched and no account platform is set',
