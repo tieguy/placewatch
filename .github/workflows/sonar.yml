@@ -28,5 +28,6 @@ jobs:
           args: >
             -Dsonar.projectKey=tieguy_sfedits
             -Dsonar.organization=tieguy
+            -Dsonar.projectVersion=${{ github.sha }}
             -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info
             -Dsonar.coverage.exclusions=**/*.test.js,test/**,**/docs/**
