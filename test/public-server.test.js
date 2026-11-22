@@ -300,6 +300,21 @@ describe('public-server', function() {
       assert.lengthOf(data.titles, 2500)
     })
 
+    it('serves the Miami watchlists', async function() {
+      const res = await fetch(`${base}/watchlist-miami-500.json`)
+      assert.equal(res.status, 200)
+      const data = await res.json()
+      assert.equal(data.count, 500)
+      assert.isArray(data.titles)
+      assert.lengthOf(data.titles, 500)
+
+      const wide = await fetch(`${base}/watchlist-miami-2500.json`)
+      assert.equal(wide.status, 200)
+      const wideData = await wide.json()
+      assert.equal(wideData.count, 2500)
+      assert.isArray(wideData.titles)
+    })
+
     it('GET /ranking.json serves the full published ranking', async function() {
       const res = await fetch(`${base}/ranking.json`)
       assert.equal(res.status, 200)

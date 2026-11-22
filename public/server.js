@@ -516,7 +516,7 @@ app.get('/changelog.json', (req, res) => {
 // circular, but the alternative - an on-wiki page - adds a parse step and a
 // second failure mode, and watchlist-sync already falls back to its last-good
 // cache if this 404s or goes away.
-for (const cut of ['500', '2500']) {
+for (const cut of ['500', '2500', 'miami-500', 'miami-2500']) {
   app.get(`/watchlist-${cut}.json`, (req, res) => {
     res.sendFile(path.join(__dirname, `watchlist-${cut}.json`))
   })
