@@ -17,38 +17,35 @@
  * WikiProject count, lead position), percentile-ranked within the
  * candidate set, and the top slice reported with evidence.
  *
- * Usage: node scripts/reassess-untagged.js <stage>|all
+ * Usage: node scripts/reassess-untagged.js --region <name> <stage>|all
  * Stages: candidates links claims assessments leads report
- * Caches: data/reassess/untagged-<stage>.json
+ * Caches: data/reassess/<region>/untagged-<stage>.json
  */
 
 const fs = require('fs')
 const path = require('path')
 const {
   percentileRanks, median, leadScore, fetchPageviews,
-  api, batches, EN_API, WD_API, PROJECT
+  api, batches, WD_API, region, setRegion, parseCli, loadTargets
 } = require('./reassess')
+const { loadProfile } = require('./region-profile')
 const { sparqlRows, isRetryable } = require('../lib/sparql')
 const { memberPattern } = require('../lib/region')
 
-const DATA_DIR = path.join(__dirname, '..', 'data', 'reassess')
-const COUNTIES = ['Q62', 'Q107146', 'Q108058', 'Q108117', 'Q108137',
-  'Q108101', 'Q110739', 'Q108083', 'Q108067']
-const PROPERTIES = ['P19', 'P20', 'P159', 'P276', 'P937']
 const REPORT_SIZE = 100
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 
-function cachePath(stage) { return path.join(DATA_DIR, `untagged-${stage}.json`) }
+function cachePath(stage) { return path.join(region().dataDir, `untagged-${stage}.json`) }
 function loadCache(stage) {
   const p = cachePath(stage)
   return fs.existsSync(p) ? JSON.parse(fs.readFileSync(p, 'utf8')) : null
 }
 function saveCache(stage, data) {
-  fs.mkdirSync(DATA_DIR, { recursive: true })
+  fs.mkdirSync(region().dataDir, { recursive: true })
   fs.writeFileSync(cachePath(stage), JSON.stringify(data))
 }
 function requireMain(stage) {
-  const p = path.join(DATA_DIR, `${stage}.json`)
+  const p = path.join(region().dataDir, `${stage}.json`)
   if (!fs.existsSync(p)) throw new Error(`run scripts/reassess.js first (missing ${stage}.json)`)
   return JSON.parse(fs.readFileSync(p, 'utf8'))
 }
@@ -89,11 +86,12 @@ function candidateQuery(via, county) {
 }
 
 /**
- * Enwiki articles for Bay-Area-connected items, minus the cohort.
- * Anchored per-county queries only - the unanchored nine-county union
+ * Enwiki articles for region-connected items, minus the cohort.
+ * Anchored per-anchor queries only - the unanchored multi-anchor union
  * times out on WDQS (learned the hard way in the claim-watch work).
  */
 async function stageCandidates() {
+  const { anchors, untaggedProperties } = region()
   const cohortTitles = new Set(requireMain('cohort').map(a => a.title))
   const found = new Map() // title -> {qid, via:Set}
 
@@ -108,11 +106,11 @@ async function stageCandidates() {
   }
 
   let n = 0
-  const total = COUNTIES.length * (PROPERTIES.length + 2)
-  for (const county of COUNTIES) {
+  const total = anchors.length * (untaggedProperties.length + 2)
+  for (const county of anchors) {
     // the places themselves, items pointing at them, and holders of offices
-    // with Bay Area jurisdiction (with retry: old loop absorbed 5 failures)
-    for (const via of ['P131', ...PROPERTIES, 'P39']) {
+    // with regional jurisdiction (with retry: old loop absorbed 5 failures)
+    for (const via of ['P131', ...untaggedProperties, 'P39']) {
       add(await sparqlRowsWithRetry(candidateQuery(via, county)), via)
       process.stdout.write(`\r  candidates: query ${++n}/${total}, ${found.size} titles`)
       await sleep(250)
@@ -142,7 +140,7 @@ async function stageLinks(candidates) {
   for (let b = checkpoint.nextBatch; b < allBatches.length; b++) {
     let cont = {}
     do {
-      const data = await api(EN_API, {
+      const data = await api(region().wikiApi, {
         action: 'query', prop: 'links', plnamespace: 0, pllimit: 'max',
         titles: allBatches[b].join('|'), ...cont
       })
@@ -164,10 +162,9 @@ async function stageLinks(candidates) {
   return counts
 }
 
-/** Bay Area statement counts for candidate items (same as main claims stage). */
+/** Region statement counts for candidate items (same as main claims stage). */
 async function stageClaims(candidates) {
-  const targets = JSON.parse(fs.readFileSync(
-    path.join(__dirname, '..', 'data', 'wikidata-claim-targets.json'), 'utf8'))
+  const targets = loadTargets()
   const places = new Set(targets.places)
   const positions = new Set(targets.positions)
   const qids = [...new Set(candidates.map(c => c.qid))]
@@ -206,7 +203,7 @@ async function stageAssessments(candidates) {
   const result = {}
   let done = 0
   for (const batch of batches(candidates.map(c => c.title), 50)) {
-    const data = await api(EN_API, {
+    const data = await api(region().wikiApi, {
       action: 'query', prop: 'pageassessments', pasubprojects: 'true',
       palimit: 'max', titles: batch.join('|')
     })
@@ -230,7 +227,7 @@ async function stageLeads(candidates) {
   const allBatches = [...batches(candidates.map(c => c.title), 20)]
 
   for (let b = checkpoint.nextBatch; b < allBatches.length; b++) {
-    const data = await api(EN_API, {
+    const data = await api(region().wikiApi, {
       action: 'query', prop: 'extracts', exintro: 1, explaintext: 1,
       exlimit: 'max', titles: allBatches[b].join('|')
     })
@@ -292,7 +289,7 @@ async function stageReport() {
 
 ${rows.length} enwiki articles are structurally connected to the Bay Area
 on Wikidata (located-in chain, birth/death/HQ/work location, or Bay Area
-office) but carry no ${PROJECT} tag. Top ${top.length} by the same
+office) but carry no ${region().project} tag. Top ${top.length} by the same
 significance score as the main reassessment, ranked within this set:
 
 | Article | Signif. | Cohort inlinks | BA statements | Via | Other projects | Lead | Views/yr |
@@ -303,8 +300,8 @@ ${top.map(r =>
   ` | ${Math.round(1 / r.exclusive - 1)} | ${r.leadTerm ? `${r.lead.toFixed(2)} "${r.leadTerm}"` : '-'}` +
   ` | ${r.views == null ? '?' : r.views.toLocaleString('en-US')} |`).join('\n')}
 `
-  fs.writeFileSync(path.join(DATA_DIR, 'untagged-report.md'), md)
-  console.log(`  wrote ${path.join(DATA_DIR, 'untagged-report.md')}`)
+  fs.writeFileSync(path.join(region().dataDir, 'untagged-report.md'), md)
+  console.log(`  wrote ${path.join(region().dataDir, 'untagged-report.md')}`)
   return top
 }
 
@@ -324,15 +321,24 @@ function requireStage(stage) {
 }
 
 async function main() {
-  const arg = process.argv[2]
-  if (!arg || (!STAGES[arg] && arg !== 'all')) {
-    console.error(`usage: node scripts/reassess-untagged.js <${Object.keys(STAGES).join('|')}|all>`)
+  let parsed
+  try {
+    parsed = parseCli(process.argv.slice(2), STAGES)
+  } catch (error) {
+    console.error(`usage: node scripts/reassess-untagged.js --region <name> <${Object.keys(STAGES).join('|')}|all>`)
+    console.error(error.message)
     process.exit(1)
   }
-  const toRun = arg === 'all' ? Object.keys(STAGES) : [arg]
+  setRegion(loadProfile(parsed.region))
+  const toRun = parsed.stage === 'all' ? Object.keys(STAGES) : [parsed.stage]
   for (const stage of toRun) {
-    if (arg === 'all' && stage !== 'report' && loadCache(stage)) {
+    if (parsed.stage === 'all' && stage !== 'report' && loadCache(stage)) {
       console.log(`${stage}: cached, skipping`)
+      continue
+    }
+    // A region without claim_targets cannot run claims; 'all' carries on.
+    if (parsed.stage === 'all' && stage === 'claims' && !region().claimTargets) {
+      console.log(`claims: skipped - region "${region().name}" has no claim_targets`)
       continue
     }
     console.log(`${stage}:`)
@@ -347,4 +353,4 @@ if (require.main === module) {
   main().catch(error => { console.error(error); process.exit(1) })
 }
 
-module.exports = { candidateQuery, PROPERTIES }
+module.exports = { candidateQuery, region }

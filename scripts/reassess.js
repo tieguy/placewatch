@@ -38,42 +38,63 @@
  * high significance). Expensive per-article data (total inlink denominators,
  * 12-month pageviews) is fetched only for those candidates.
  *
- * Usage: node scripts/reassess.js <stage>|all
+ * Usage: node scripts/reassess.js --region <name> <stage>|all
  * Stages: cohort qids links links-prose links-prose-all redirects claims
  *         assessments leads denoms score report
- * Caches: data/reassess/<stage>.json (delete a file to force a re-fetch)
+ * Caches: data/reassess/<region>/<stage>.json (delete a file to force a re-fetch)
  */
 
 const fs = require('fs')
 const path = require('path')
 const wtf = require('wtf_wikipedia')
+const minimist = require('minimist')
 const { actionSession, wmFetch } = require('../lib/mw-api')
+const { loadProfile, leadMatcher } = require('./region-profile')
 
-const DATA_DIR = path.join(__dirname, '..', 'data', 'reassess')
-const EN_API = 'https://en.wikipedia.org/w/api.php'
 const WD_API = 'https://www.wikidata.org/w/api.php'
-const PROJECT = 'California/San Francisco Bay Area task force'
 const CANDIDATES_PER_DIRECTION = 60
 
-// Terms whose appearance early in the lead marks a defining Bay Area
-// connection. Deliberately conservative: ambiguous names (Richmond,
-// Santa Rosa) are omitted; a few mild false-positive risks (Menlo Park,
-// Mountain View) are accepted since the metric is one voice of four.
-const BAY_AREA_TERMS = [
-  'San Francisco', 'Bay Area', 'Silicon Valley', 'Oakland', 'Berkeley',
-  'San Jose', 'San José', 'Palo Alto', 'Stanford', 'Marin County',
-  'Sausalito', 'Napa', 'Sonoma', 'Santa Clara', 'San Mateo', 'Alameda',
-  'Contra Costa', 'Solano', 'Golden Gate', 'Cupertino', 'Mountain View',
-  'Menlo Park', 'Redwood City', 'Sunnyvale', 'Fremont, California',
-  'Vallejo', 'Hayward', 'Daly City', 'Emeryville', 'Mission District',
-  'Haight-Ashbury', 'Presidio', 'Golden State Warriors', 'Alcatraz', 'Caltrain'
-]
-const BAY_AREA_RE = new RegExp(`(${BAY_AREA_TERMS.map(t =>
-  t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})`)
+// ------------------------------------------------------------------ region
+
+// The active region profile: every per-region constant - the WikiProject
+// queried, the wiki API, the cache directory, the lead-term matcher, the
+// claim-target file, the untagged-candidate anchors and properties - is read
+// through region() at CALL time, so no stage captures a stale value. The
+// module loads with sfba active, so pure-function callers behave exactly as
+// they did before profiles existed. Lead terms live in regions/<name>.json;
+// ambiguous names stay out of that list per profile (see regions/sfba.json).
+let activeRegion = null
+
+function buildRegion(profile) {
+  const { termsRe, exclusionsRe } = leadMatcher(profile)
+  return {
+    name: profile.name,
+    project: profile.wikiproject,
+    wikiApi: profile.wiki_api,
+    dataDir: path.join(__dirname, '..', 'data', 'reassess', profile.name),
+    termsRe,
+    exclusionsRe,
+    claimTargets: profile.claim_targets
+      ? path.resolve(__dirname, '..', profile.claim_targets)
+      : null,
+    anchors: profile.anchors,
+    untaggedProperties: profile.untagged_properties
+  }
+}
+
+function setRegion(profile) {
+  activeRegion = buildRegion(profile)
+}
+
+function region() {
+  return activeRegion
+}
+
+setRegion(loadProfile('sfba'))
 
 // ---------------------------------------------------------------- helpers
 
-function cachePath(stage) { return path.join(DATA_DIR, `${stage}.json`) }
+function cachePath(stage) { return path.join(region().dataDir, `${stage}.json`) }
 
 function loadCache(stage) {
   const p = cachePath(stage)
@@ -81,7 +102,7 @@ function loadCache(stage) {
 }
 
 function saveCache(stage, data) {
-  fs.mkdirSync(DATA_DIR, { recursive: true })
+  fs.mkdirSync(region().dataDir, { recursive: true })
   fs.writeFileSync(cachePath(stage), JSON.stringify(data))
 }
 
@@ -130,12 +151,19 @@ function median(values) {
 }
 
 /**
- * 0..1 score for how early the lead mentions a Bay Area term.
+ * 0..1 score for how early the lead mentions a region term.
  * 1 = first character, ~0 = end of lead, 0 = never mentioned.
+ * Exclusion matches are blanked out with same-length spaces first, so every
+ * index the formula scores against is unchanged (an Ohio "Miami" is not a
+ * South Florida "Miami", but it must not shift the position of a later one).
  */
-function leadScore(text) {
+function leadScore(text, { termsRe, exclusionsRe } = region()) {
   if (!text) return { score: 0, term: null }
-  const m = BAY_AREA_RE.exec(text)
+  if (exclusionsRe) {
+    text = text.replace(new RegExp(exclusionsRe.source, 'g'),
+      m => ' '.repeat(m.length))
+  }
+  const m = termsRe.exec(text)
   if (!m) return { score: 0, term: null }
   return { score: 1 - m.index / Math.max(text.length, 1), term: m[1] }
 }
@@ -209,14 +237,15 @@ function canonicalInlinks(counts, redirects, cohortTitles) {
 
 /** Full task-force listing with per-article importance. */
 async function stageCohort() {
+  const project = region().project
   const articles = []
   let cont = {}
   do {
-    const data = await api(EN_API, {
-      action: 'query', list: 'projectpages', wppprojects: PROJECT,
+    const data = await api(region().wikiApi, {
+      action: 'query', list: 'projectpages', wppprojects: project,
       wppassessments: 'true', wpplimit: 'max', ...cont
     })
-    for (const page of (data.query?.projects?.[PROJECT] || [])) {
+    for (const page of (data.query?.projects?.[project] || [])) {
       if (page.ns !== 0) continue
       const importance = (page.assessment?.importance || 'unknown').toLowerCase()
       articles.push({ title: page.title, importance: importance || 'unknown' })
@@ -236,7 +265,7 @@ async function stageQids(cohort) {
   let done = checkpoint.nextBatch * 50
   for (let b = checkpoint.nextBatch; b < allBatches.length; b++) {
     const batch = allBatches[b]
-    const data = await api(EN_API, {
+    const data = await api(region().wikiApi, {
       action: 'query', prop: 'pageprops', ppprop: 'wikibase_item',
       titles: batch.join('|')
     })
@@ -273,7 +302,7 @@ async function stageLinks(cohort) {
   for (let b = checkpoint.nextBatch; b < allBatches.length; b++) {
     let cont = {}
     do {
-      const data = await api(EN_API, {
+      const data = await api(region().wikiApi, {
         action: 'query', prop: 'links', plnamespace: 0, pllimit: 'max',
         titles: allBatches[b].join('|'), ...cont
       })
@@ -317,7 +346,7 @@ async function stageLinksProse(cohort) {
   for (let b = checkpoint.nextBatch; b < allBatches.length; b++) {
     let cont = {}
     do {
-      const data = await api(EN_API, {
+      const data = await api(region().wikiApi, {
         action: 'query', prop: 'revisions', rvslots: 'main', rvprop: 'content',
         titles: allBatches[b].join('|'), ...cont
       })
@@ -357,7 +386,7 @@ async function stageLinksProseAll(universe) {
   for (let b = checkpoint.nextBatch; b < allBatches.length; b++) {
     let cont = {}
     do {
-      const data = await api(EN_API, {
+      const data = await api(region().wikiApi, {
         action: 'query', prop: 'revisions', rvslots: 'main', rvprop: 'content',
         titles: allBatches[b].join('|'), ...cont
       })
@@ -456,7 +485,7 @@ async function stageRedirects(titles) {
   for (let b = checkpoint.nextBatch; b < allBatches.length; b++) {
     let cont = {}
     do {
-      const data = await api(EN_API, {
+      const data = await api(region().wikiApi, {
         action: 'query', prop: 'redirects', rdnamespace: 0, rdlimit: 'max',
         titles: allBatches[b].join('|'), ...cont
       })
@@ -520,11 +549,14 @@ async function stageClaims(qids) {
 }
 
 function loadTargets() {
-  const p = path.join(__dirname, '..', 'data', 'wikidata-claim-targets.json')
-  if (!fs.existsSync(p)) {
-    throw new Error(`${p} missing - run the bot once locally or copy the cache`)
+  const { name, claimTargets } = region()
+  if (!claimTargets) {
+    throw new Error(`region "${name}" has no claim_targets; the claims stage needs them`)
   }
-  return JSON.parse(fs.readFileSync(p, 'utf8'))
+  if (!fs.existsSync(claimTargets)) {
+    throw new Error(`${claimTargets} missing - run the bot once locally or copy the cache`)
+  }
+  return JSON.parse(fs.readFileSync(claimTargets, 'utf8'))
 }
 
 /** All WikiProjects assessing each article (for the exclusivity metric). */
@@ -535,7 +567,7 @@ async function stageAssessments(cohort) {
   let done = checkpoint.nextBatch * 50
   for (let b = checkpoint.nextBatch; b < allBatches.length; b++) {
     const batch = allBatches[b]
-    const data = await api(EN_API, {
+    const data = await api(region().wikiApi, {
       action: 'query', prop: 'pageassessments', pasubprojects: 'true',
       palimit: 'max', titles: batch.join('|')
     })
@@ -544,7 +576,7 @@ async function stageAssessments(cohort) {
     for (const page of Object.values(data.query?.pages || {})) {
       const title = renames[page.title] || page.title
       const projects = Object.keys(page.pageassessments || {})
-      const others = projects.filter(p => p !== PROJECT)
+      const others = projects.filter(p => p !== region().project)
       result[title] = { otherProjects: others.length }
     }
     done += batch.length
@@ -566,7 +598,7 @@ async function stageLeads(cohort) {
   const allBatches = [...batches(cohort.map(a => a.title), 20)]
 
   for (let b = checkpoint.nextBatch; b < allBatches.length; b++) {
-    const data = await api(EN_API, {
+    const data = await api(region().wikiApi, {
       action: 'query', prop: 'extracts', exintro: 1, explaintext: 1,
       exlimit: 'max', titles: allBatches[b].join('|')
     })
@@ -741,7 +773,7 @@ async function fetchBacklinkCount(title) {
   let count = 0
   let cont = {}
   for (let page = 0; page < 20; page++) {
-    const data = await api(EN_API, {
+    const data = await api(region().wikiApi, {
       action: 'query', list: 'backlinks', bltitle: title,
       blnamespace: 0, bllimit: 'max', ...cont
     })
@@ -848,8 +880,8 @@ ${reportTable(demote)}
 
 ${reportTable(promote)}
 `
-  fs.writeFileSync(path.join(DATA_DIR, 'report.md'), md)
-  console.log(`  wrote ${path.join(DATA_DIR, 'report.md')}`)
+  fs.writeFileSync(path.join(region().dataDir, 'report.md'), md)
+  console.log(`  wrote ${path.join(region().dataDir, 'report.md')}`)
   return { demote, promote }
 }
 
@@ -877,17 +909,38 @@ function requireCache(stage) {
   return data
 }
 
+/**
+ * Parse `--region <name> <stage>|all`. `stages` defaults to this script's
+ * stage table so companion scripts can reuse the parser with their own.
+ */
+function parseCli(argv, stages = STAGES) {
+  const args = minimist(argv, { string: ['region'] })
+  const stage = args._[0]
+  if (!args.region) throw new Error('--region is required')
+  if (stage !== 'all' && !(stage in stages)) throw new Error(`unknown stage "${stage}"`)
+  return { region: args.region, stage }
+}
+
 async function main() {
-  const arg = process.argv[2]
-  if (!arg || (!STAGES[arg] && arg !== 'all')) {
-    console.error(`usage: node scripts/reassess.js <${Object.keys(STAGES).join('|')}|all>`)
+  let parsed
+  try {
+    parsed = parseCli(process.argv.slice(2))
+  } catch (error) {
+    console.error(`usage: node scripts/reassess.js --region <name> <${Object.keys(STAGES).join('|')}|all>`)
+    console.error(error.message)
     process.exit(1)
   }
-  const toRun = arg === 'all' ? Object.keys(STAGES) : [arg]
+  setRegion(loadProfile(parsed.region))
+  const toRun = parsed.stage === 'all' ? Object.keys(STAGES) : [parsed.stage]
   for (const stage of toRun) {
     // 'all' skips completed stages; report is cheap enough to always rebuild
-    if (arg === 'all' && stage !== 'report' && loadCache(stage)) {
+    if (parsed.stage === 'all' && stage !== 'report' && loadCache(stage)) {
       console.log(`${stage}: cached, skipping`)
+      continue
+    }
+    // A region without claim_targets cannot run claims; 'all' carries on.
+    if (parsed.stage === 'all' && stage === 'claims' && !region().claimTargets) {
+      console.log(`claims: skipped - region "${region().name}" has no claim_targets`)
       continue
     }
     console.log(`${stage}:`)
@@ -905,5 +958,5 @@ if (require.main === module) {
 module.exports = {
   percentileRanks, median, leadScore, scoreCohort, pickCandidates, wikitextLinks,
   canonicalInlinks, redirectTargets, buildUniverse, assignTiers, IS_HERE_PROPERTIES,
-  fetchPageviews, BAY_AREA_RE, api, batches, EN_API, WD_API, PROJECT
+  fetchPageviews, setRegion, region, parseCli, loadTargets, api, batches, WD_API
 }

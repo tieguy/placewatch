@@ -174,30 +174,43 @@ Top and High lists before you launch.
 
 ### Option B: rerun our ranking for your region (a day or two)
 
-1. Copy `scripts/rank.js` from the `place-bot-platform-design` branch, because
-   it is not on `integration`:
-   `git show fork/place-bot-platform-design:scripts/rank.js > scripts/rank.js`.
-   It uses functions that `integration`'s `scripts/reassess.js` exports.
-2. Change the Bay Area values in the scripts:
-   - `PROJECT` in `scripts/reassess.js` (your WikiProject name);
-   - `BAY_AREA_TERMS` in `scripts/reassess.js` (place names that show an
-     article is about your region);
-   - `COUNTIES` in `scripts/reassess-untagged.js` (the Wikidata QIDs of your
-     region's top-level areas; the Bay Area uses its nine counties, starting
-     with `Q62`, San Francisco).
-3. Run `node scripts/reassess.js all`, then `node scripts/reassess-untagged.js
-   all`, then `node scripts/rank.js --watchlist 500 --wide 2500`. The link crawl
-   reads every article in the universe, so expect it to take a while. The
-   scripts cache each stage in `data/reassess/`, so an interrupted run resumes.
-4. Read `data/reassess/ranking-report.md` before you publish the list. Look for
-   articles that are on the list only because Bay Area articles mention them
-   often. In our run, untagged articles such as Microsoft and UC Davis ranked
-   high this way.
-5. Publish `watchlist-500.json` somewhere public and set `titles_url` to it.
+1. Write a region profile: copy `regions/sfba.json` to `regions/<name>.json`
+   and edit it. The name (lowercase letters, digits, hyphens) names both the
+   file and the cache directory. The fields that need thought:
+   - `wikiproject`: your WikiProject or task force name. Check it first. A
+     wrong name returns no articles and gives no error. Task force names
+     include the parent project, as in `California/San Francisco Bay Area
+     task force`.
+   - `anchors`: the Wikidata QIDs of your region's top-level areas; the Bay
+     Area uses its nine counties, starting with `Q62`, San Francisco.
+   - `lead_terms`: place names whose early appearance in an article's lead
+     marks a defining regional connection. Keep ambiguous names out.
+   - `lead_exclusions`: uses of those names that are NOT about your region
+     (for Miami: `Miami University`, `Miami, Oklahoma`). They are blanked
+     out before the lead is scored.
+   - `claim_targets`: the bot's claim-watch target cache, which the claims
+     stage counts statements against. Leave it `null` if you do not have
+     one; the claims stage then refuses to run, and `all` skips it with a
+     log line.
+2. Run each command with `--region <name>`: `node scripts/reassess.js
+   --region <name> all`, then `node scripts/reassess-untagged.js --region
+   <name> all`, then `node scripts/rank.js --region <name> --watchlist 500
+   --wide 2500`. The link crawl reads every article in the universe, so
+   expect it to take a while.
+3. Caches live in `data/reassess/<name>/`, one file per stage: delete a
+   file to force a re-fetch, and an interrupted run resumes. Old flat
+   caches in `data/reassess/` are ignored: move them into
+   `data/reassess/sfba/` to reuse them.
+4. Read `data/reassess/<name>/ranking-report.md` before you publish the
+   list. Look for articles that are on the list only because your region's
+   articles mention them often. In our run, untagged articles such as
+   Microsoft and UC Davis ranked high this way.
+5. Publish `watchlist-500.json` from the same directory somewhere public
+   and set `titles_url` to it.
 
-If your region has no WikiProject, skip the tagged-articles part and build the
-universe from Wikidata alone. Expect more irrelevant articles in the ranking,
-and check the top of the list by hand.
+If your region has no WikiProject, skip the tagged-articles part and build
+the universe from Wikidata alone. Expect more irrelevant articles in the
+ranking, and check the top of the list by hand.
 
 ### Option C: a Wikidata region topic (experimental)
 

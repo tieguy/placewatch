@@ -1,9 +1,12 @@
+const path = require('path')
 const { assert } = require('chai')
 
 const {
-  percentileRanks, median, leadScore, scoreCohort, pickCandidates, BAY_AREA_RE,
-  wikitextLinks, canonicalInlinks, redirectTargets, buildUniverse, assignTiers
+  percentileRanks, median, leadScore, scoreCohort, pickCandidates,
+  wikitextLinks, canonicalInlinks, redirectTargets, buildUniverse, assignTiers,
+  setRegion, region, parseCli, loadTargets
 } = require('../scripts/reassess')
+const { loadProfile, leadMatcher } = require('../scripts/region-profile')
 
 describe('reassess', function() {
 
@@ -52,7 +55,51 @@ describe('reassess', function() {
     })
 
     it('does not match ambiguous bare city names', function() {
-      assert.isNull(BAY_AREA_RE.exec('Richmond and Santa Rosa are ambiguous.'))
+      assert.isNull(region().termsRe.exec('Richmond and Santa Rosa are ambiguous.'))
+    })
+  })
+
+  describe('region', function() {
+    // Region state is module-global: put it back after every test so the
+    // sfba default the rest of the suite relies on is never leaked away.
+    afterEach(function() { setRegion(loadProfile('sfba')) })
+
+    it('parseCli requires --region', function() {
+      assert.throws(() => parseCli([]), /--region is required/)
+      assert.deepEqual(parseCli(['--region', 'miami', 'cohort']),
+        { region: 'miami', stage: 'cohort' })
+    })
+
+    it('setRegion moves the cache directory', function() {
+      setRegion(loadProfile('miami'))
+      assert.isTrue(region().dataDir.endsWith(path.join('data', 'reassess', 'miami')))
+    })
+
+    it('miami lead gate excludes Miami University and Miami, Oklahoma', function() {
+      const m = leadMatcher(loadProfile('miami'))
+      assert.equal(
+        leadScore('Miami University is a public university in Oxford, Ohio.', m).score, 0)
+      assert.equal(
+        leadScore('Miami, Oklahoma is a city in Ottawa County.', m).score, 0)
+      assert.isAbove(
+        leadScore('The University of Miami is a private university in Coral Gables, Florida.', m).score,
+        0)
+    })
+
+    it('an exclusion keeps later matches at their original index', function() {
+      const m = leadMatcher(loadProfile('miami'))
+      const t = 'Founded in Miami, Oklahoma, the firm later moved to Miami.'
+      // 'Miami, Oklahoma' is blanked out with same-length spaces, so the
+      // surviving 'Miami' must still score at its original character index.
+      const idx = t.lastIndexOf('Miami')
+      assert.equal(leadScore(t, m).score, 1 - idx / t.length)
+      assert.equal(leadScore(t, m).term, 'Miami')
+    })
+
+    it('claims stage refuses a region without claim_targets', function() {
+      setRegion(loadProfile('miami'))
+      assert.throws(() => loadTargets(),
+        /region "miami" has no claim_targets; the claims stage needs them/)
     })
   })
 

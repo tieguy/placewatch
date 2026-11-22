@@ -1,7 +1,7 @@
 const { assert } = require('chai')
 const { describe, it } = require('mocha')
 
-const { candidateQuery, PROPERTIES } = require('../scripts/reassess-untagged')
+const { candidateQuery, region } = require('../scripts/reassess-untagged')
 const { memberPattern } = require('../lib/region')
 
 describe('reassess-untagged', function() {
@@ -27,11 +27,18 @@ describe('reassess-untagged', function() {
       assert.throws(() => candidateQuery('P131', 'Q0abc'), /QID/)
     })
 
+    it('composes a query for every sfba anchor', function() {
+      for (const anchor of region().anchors) {
+        assert.include(candidateQuery('P131', anchor), memberPattern('P131', anchor))
+      }
+    })
+
     it('keeps the deliberately wider tagging-candidate property set', function() {
       // Born/died/worked-here are excluded from watchlist membership
       // (lib/region IS_HERE_PROPERTIES) but kept here: as a one-time
       // tagging-candidate list, noise just means a human skims past.
-      assert.deepEqual(PROPERTIES, ['P19', 'P20', 'P159', 'P276', 'P937'])
+      assert.deepEqual(region().untaggedProperties,
+        ['P19', 'P20', 'P159', 'P276', 'P937'])
     })
   })
 })
