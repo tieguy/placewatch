@@ -1,0 +1,40 @@
+{
+  "name": "miami",
+  "label": "Miami metropolitan area",
+  "wikiproject": "Miami",
+  "wiki_api": "https://en.wikipedia.org/w/api.php",
+  "anchors": ["Q468557", "Q494624", "Q484294"],
+  "untagged_properties": ["P19", "P20", "P159", "P276", "P937"],
+  "lead_terms": [
+    "Miami",
+    "Miami-Dade",
+    "Miami Beach",
+    "Fort Lauderdale",
+    "Broward",
+    "Palm Beach",
+    "Hialeah",
+    "Coral Gables",
+    "Everglades",
+    "Biscayne",
+    "Key Biscayne",
+    "Little Havana",
+    "Wynwood",
+    "Homestead, Florida",
+    "Hollywood, Florida",
+    "Boca Raton",
+    "South Florida"
+  ],
+  "lead_exclusions": [
+    "Miami University",
+    "Miami, Oklahoma",
+    "Miami, Ohio",
+    "Miami County",
+    "Miami RedHawks",
+    "Miami people",
+    "Miami tribe",
+    "Miami-Illinois"
+  ],
+  "live_importance": ["top", "high", "mid"],
+  "claim_targets": null,
+  "exclude_titles": []
+}
