@@ -1,0 +1,7 @@
+[
+  { "title": "Salesforce Tower", "qid": "Q39786206", "via": ["P131"] },
+  { "title": "Palace of Fine Arts", "qid": "Q1632313", "via": ["P131", "P276"] },
+  { "title": "Half Moon Bay, California", "qid": "Q928118", "via": ["P131"] },
+  { "title": "Grace Cathedral (San Francisco)", "qid": "Q5591934", "via": ["P276"] },
+  { "title": "Steve Jobs", "qid": "Q5361468", "via": ["P19"] }
+]
