@@ -9,7 +9,7 @@
  * percentile-ranked across tagged+untagged together) beats the median
  * MID-tier tagged article - the "hard to argue against tagging" band.
  *
- * Output: data/reassess/matrix-untagged.html - a self-contained SVG
+ * Output: data/reassess/<region>/matrix-untagged.html - a self-contained SVG
  * scatterplot (no external dependencies): x = pageviews (log), y =
  * significance, color = best existing quality class from other
  * WikiProjects, hover for Wikidata description, click to open.
@@ -26,24 +26,25 @@
 const fs = require('fs')
 const path = require('path')
 const {
-  percentileRanks, median, api, batches, EN_API, WD_API
+  percentileRanks, median, api, batches, region, WD_API
 } = require('./reassess')
 const { wmFetch } = require('../lib/mw-api')
 
-const DATA_DIR = path.join(__dirname, '..', 'data', 'reassess')
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 
-function cachePath(stage) { return path.join(DATA_DIR, `matrix-${stage}.json`) }
+// Runs on the default sfba region (no CLI of its own): same caches and wiki
+// API as scripts/reassess.js, now read through the region accessor.
+function cachePath(stage) { return path.join(region().dataDir, `matrix-${stage}.json`) }
 function loadCache(stage) {
   const p = cachePath(stage)
   return fs.existsSync(p) ? JSON.parse(fs.readFileSync(p, 'utf8')) : null
 }
 function saveCache(stage, data) {
-  fs.mkdirSync(DATA_DIR, { recursive: true })
+  fs.mkdirSync(region().dataDir, { recursive: true })
   fs.writeFileSync(cachePath(stage), JSON.stringify(data))
 }
 function requireFile(name) {
-  const p = path.join(DATA_DIR, `${name}.json`)
+  const p = path.join(region().dataDir, `${name}.json`)
   if (!fs.existsSync(p)) throw new Error(`missing ${p} - run the earlier scripts first`)
   return JSON.parse(fs.readFileSync(p, 'utf8'))
 }
@@ -160,7 +161,7 @@ async function stageClasses(poolData) {
   const allBatches = [...batches(titles, 50)]
 
   for (let b = checkpoint.nextBatch; b < allBatches.length; b++) {
-    const data = await api(EN_API, {
+    const data = await api(region().wikiApi, {
       action: 'query', prop: 'pageassessments', pasubprojects: 'true',
       palimit: 'max', titles: allBatches[b].join('|')
     })
@@ -211,7 +212,7 @@ function stageHtml() {
   // This signals that the analysis is point-in-time, not live.
   const snapshot = fs.statSync(cachePath('views')).mtime.toISOString().slice(0, 10)
   const html = buildHtml(points, { midMedian, snapshot })
-  const out = path.join(DATA_DIR, 'matrix-untagged.html')
+  const out = path.join(region().dataDir, 'matrix-untagged.html')
   fs.writeFileSync(out, html)
   console.log(`  wrote ${out} (${points.length} points)`)
   return null

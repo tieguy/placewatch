@@ -1,3 +1,6 @@
+const fs = require('fs')
+const path = require('path')
+const { spawnSync } = require('child_process')
 const { assert } = require('chai')
 const { describe, it } = require('mocha')
 
@@ -39,6 +42,44 @@ describe('reassess-untagged', function() {
       // tagging-candidate list, noise just means a human skims past.
       assert.deepEqual(region().untaggedProperties,
         ['P19', 'P20', 'P159', 'P276', 'P937'])
+    })
+  })
+
+  describe("untagged 'all' without claim_targets", function() {
+    this.timeout(10000)
+    const repo = path.join(__dirname, '..')
+    const miamiDir = path.join(repo, 'data', 'reassess', 'miami')
+
+    // Cache hits for every claims-independent stage keep the run offline;
+    // the skip rule alone decides claims and report (report reads claims).
+    beforeEach(function() {
+      if (fs.existsSync(miamiDir)) this.skip()  // never clobber a real Miami run
+      fs.mkdirSync(miamiDir, { recursive: true })
+      for (const name of ['cohort', 'untagged-candidates', 'untagged-links',
+        'untagged-assessments', 'untagged-leads']) {
+        fs.writeFileSync(path.join(miamiDir, `${name}.json`), '[]')
+      }
+    })
+    afterEach(function() { fs.rmSync(miamiDir, { recursive: true, force: true }) })
+
+    it("skips claims and report and ends cleanly", function() {
+      const out = spawnSync('node',
+        ['scripts/reassess-untagged.js', '--region', 'miami', 'all'],
+        { cwd: repo, encoding: 'utf8' })
+      assert.equal(out.status, 0, out.stderr)
+      assert.include(out.stdout,
+        'region "miami" has no claim_targets; skipping claims and report — run scripts/rank.js for the ranking')
+      assert.lengthOf(out.stdout.match(/has no claim_targets; skipping/g), 1)
+      assert.notInclude(out.stdout, 'missing untagged stage caches')
+    })
+
+    it('a direct claims run still throws instead of skipping', function() {
+      const out = spawnSync('node',
+        ['scripts/reassess-untagged.js', '--region', 'miami', 'claims'],
+        { cwd: repo, encoding: 'utf8' })
+      assert.equal(out.status, 1)
+      assert.match(out.stderr,
+        /region "miami" has no claim_targets; the claims stage needs them/)
     })
   })
 })

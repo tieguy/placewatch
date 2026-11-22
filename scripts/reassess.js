@@ -921,6 +921,25 @@ function parseCli(argv, stages = STAGES) {
   return { region: args.region, stage }
 }
 
+/**
+ * For an `all` run in a region without claim_targets: claims cannot run, and
+ * every stage that reads its cache transitively cannot follow. Returns the
+ * stages to skip and the ONE log line that says so; `skipStages` is the
+ * caller's claims-dependent set. Any other run - a single stage, or a region
+ * WITH claim_targets - skips nothing, and a direct claims invocation still
+ * throws in loadTargets().
+ */
+function noClaimTargetsSkip(stageArg, skipStages, { name, claimTargets } = region()) {
+  if (stageArg !== 'all' || claimTargets) return { skipped: [], line: null }
+  const list = skipStages.length > 1
+    ? `${skipStages.slice(0, -1).join(', ')} and ${skipStages[skipStages.length - 1]}`
+    : skipStages[0]
+  return {
+    skipped: skipStages,
+    line: `region "${name}" has no claim_targets; skipping ${list} — run scripts/rank.js for the ranking`
+  }
+}
+
 async function main() {
   let parsed
   try {
@@ -932,15 +951,17 @@ async function main() {
   }
   setRegion(loadProfile(parsed.region))
   const toRun = parsed.stage === 'all' ? Object.keys(STAGES) : [parsed.stage]
+  // score reads the claims cache and report reads score; without
+  // claim_targets none of the three can run, and 'all' still ends cleanly
+  const { skipped, line } = noClaimTargetsSkip(parsed.stage, ['claims', 'score', 'report'])
   for (const stage of toRun) {
     // 'all' skips completed stages; report is cheap enough to always rebuild
     if (parsed.stage === 'all' && stage !== 'report' && loadCache(stage)) {
       console.log(`${stage}: cached, skipping`)
       continue
     }
-    // A region without claim_targets cannot run claims; 'all' carries on.
-    if (parsed.stage === 'all' && stage === 'claims' && !region().claimTargets) {
-      console.log(`claims: skipped - region "${region().name}" has no claim_targets`)
+    if (skipped.includes(stage)) {
+      if (line && stage === skipped[0]) console.log(line)
       continue
     }
     console.log(`${stage}:`)
@@ -958,5 +979,6 @@ if (require.main === module) {
 module.exports = {
   percentileRanks, median, leadScore, scoreCohort, pickCandidates, wikitextLinks,
   canonicalInlinks, redirectTargets, buildUniverse, assignTiers, IS_HERE_PROPERTIES,
-  fetchPageviews, setRegion, region, parseCli, loadTargets, api, batches, WD_API
+  fetchPageviews, setRegion, region, parseCli, loadTargets, noClaimTargetsSkip,
+  api, batches, WD_API
 }

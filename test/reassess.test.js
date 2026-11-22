@@ -1,4 +1,6 @@
+const fs = require('fs')
 const path = require('path')
+const { spawnSync } = require('child_process')
 const { assert } = require('chai')
 
 const {
@@ -99,6 +101,45 @@ describe('reassess', function() {
     it('claims stage refuses a region without claim_targets', function() {
       setRegion(loadProfile('miami'))
       assert.throws(() => loadTargets(),
+        /region "miami" has no claim_targets; the claims stage needs them/)
+    })
+  })
+
+  describe("reassess 'all' without claim_targets", function() {
+    this.timeout(10000)
+    const repo = path.join(__dirname, '..')
+    const miamiDir = path.join(repo, 'data', 'reassess', 'miami')
+
+    // Seed every claims-independent stage cache so `all` resolves each one
+    // as a cache hit and never touches the network; the skip rule is then
+    // the only thing standing between the run and claims/score/report.
+    beforeEach(function() {
+      if (fs.existsSync(miamiDir)) this.skip()  // never clobber a real Miami run
+      fs.mkdirSync(miamiDir, { recursive: true })
+      for (const stage of ['cohort', 'qids', 'links', 'links-prose',
+        'links-prose-all', 'redirects', 'assessments', 'leads', 'denoms']) {
+        fs.writeFileSync(path.join(miamiDir, `${stage}.json`), '[]')
+      }
+    })
+    afterEach(function() { fs.rmSync(miamiDir, { recursive: true, force: true }) })
+
+    it("skips claims, score and report and ends cleanly", function() {
+      const out = spawnSync('node', ['scripts/reassess.js', '--region', 'miami', 'all'],
+        { cwd: repo, encoding: 'utf8' })
+      assert.equal(out.status, 0, out.stderr)
+      assert.include(out.stdout,
+        'region "miami" has no claim_targets; skipping claims, score and report — run scripts/rank.js for the ranking')
+      // one line total, and the claims-dependent stages never ran
+      assert.lengthOf(out.stdout.match(/has no claim_targets; skipping/g), 1)
+      assert.notInclude(out.stdout, 'missing stage caches')
+      assert.notInclude(out.stdout, 'run the score stage first')
+    })
+
+    it('a direct claims run still throws instead of skipping', function() {
+      const out = spawnSync('node', ['scripts/reassess.js', '--region', 'miami', 'claims'],
+        { cwd: repo, encoding: 'utf8' })
+      assert.equal(out.status, 1)
+      assert.match(out.stderr,
         /region "miami" has no claim_targets; the claims stage needs them/)
     })
   })

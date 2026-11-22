@@ -26,7 +26,8 @@ const fs = require('fs')
 const path = require('path')
 const {
   percentileRanks, median, leadScore, fetchPageviews,
-  api, batches, WD_API, region, setRegion, parseCli, loadTargets
+  api, batches, WD_API, region, setRegion, parseCli, loadTargets,
+  noClaimTargetsSkip
 } = require('./reassess')
 const { loadProfile } = require('./region-profile')
 const { sparqlRows, isRetryable } = require('../lib/sparql')
@@ -331,14 +332,16 @@ async function main() {
   }
   setRegion(loadProfile(parsed.region))
   const toRun = parsed.stage === 'all' ? Object.keys(STAGES) : [parsed.stage]
+  // report reads the claims cache; without claim_targets neither can run,
+  // and 'all' still ends cleanly
+  const { skipped, line } = noClaimTargetsSkip(parsed.stage, ['claims', 'report'])
   for (const stage of toRun) {
     if (parsed.stage === 'all' && stage !== 'report' && loadCache(stage)) {
       console.log(`${stage}: cached, skipping`)
       continue
     }
-    // A region without claim_targets cannot run claims; 'all' carries on.
-    if (parsed.stage === 'all' && stage === 'claims' && !region().claimTargets) {
-      console.log(`claims: skipped - region "${region().name}" has no claim_targets`)
+    if (skipped.includes(stage)) {
+      if (line && stage === skipped[0]) console.log(line)
       continue
     }
     console.log(`${stage}:`)
