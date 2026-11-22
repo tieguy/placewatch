@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * Produce the Bay Area article ranking, proposed importance tiers, and the bot
+ * Produce a region's article ranking, proposed importance tiers, and the bot
  * watchlist, from caches built by reassess.js and reassess-untagged.js.
  * LOCAL tool - never deployed, never run by the bot.
  *
@@ -10,20 +10,21 @@
  * redirects folded onto canonical titles.
  *
  * The universe is every tagged article plus Wikidata candidates whose data says
- * the subject IS in the nine counties (located in / headquartered / at / holds a
- * Bay Area office), NOT merely that a person was born, died or worked here.
+ * the subject IS in the region (located in / headquartered / at / holds a
+ * regional office), NOT merely that a person was born, died or worked here.
  * Sources and targets both come from that set - counting links only from tagged
  * articles would make under-tagged parts of the region look less central, which
- * is self-reinforcing.
+ * is self-reinforcing. Titles the region profile excludes (profile towns,
+ * sandbagged articles) are dropped from the universe before ranking.
  *
  * Tier CUTS are a judgement call the data cannot make. The defaults below are a
  * proposal, not a finding; --top/--high/--mid override them.
  *
  * Method and evidence: docs/importance-ranking-methodology.md
  *
- * Usage: node scripts/rank.js [--watchlist N] [--wide N]
+ * Usage: node scripts/rank.js --region <name> [--watchlist N] [--wide N]
  *                             [--top 0.0025] [--high 0.025] [--mid 0.15]
- * Outputs (data/reassess/):
+ * Outputs (data/reassess/<name>/):
  *   ranking.json          every article, ranked, with tier and current rating
  *   watchlist.json        the top N titles, bare array (legacy shape)
  *   watchlist-500.json    the bot's list, with provenance - published
@@ -33,20 +34,14 @@
 
 const fs = require('fs')
 const path = require('path')
+const minimist = require('minimist')
 const {
-  canonicalInlinks, buildUniverse, assignTiers, IS_HERE_PROPERTIES
+  canonicalInlinks, buildUniverse, assignTiers, percentileRanks,
+  IS_HERE_PROPERTIES
 } = require('./reassess')
+const { loadProfile } = require('./region-profile')
 
-const DATA_DIR = path.join(__dirname, '..', 'data', 'reassess')
 const DEFAULTS = { top: 0.0025, high: 0.025, mid: 0.15, watchlist: 500, wide: 2500 }
-
-// The importance filter the DEPLOYED bot runs, which is the only honest
-// baseline for the added/dropped diff below. Verified live against
-// /api/topics.json on 2026-07-31: Top+High+Mid, 2,455 articles. This was
-// ['top','high'] (506 articles) until then, which understated the size of the
-// change by an order of magnitude - the switch drops ~2,000 articles, it does
-// not swap ~290. If the live config's importance filter changes, change this.
-const LIVE_IMPORTANCE = ['top', 'high', 'mid']
 
 /**
  * The two published cuts of one ranking. The narrow list is what the bot
@@ -67,15 +62,44 @@ function load(dataDir, name) {
   return JSON.parse(fs.readFileSync(p, 'utf8'))
 }
 
+/**
+ * Parse `--region <name> [--watchlist N] [--wide N] [--top F] [--high F]
+ * [--mid F]`. Same missing-region message as reassess.js.
+ * @returns {{ region: string, opts: Object }}
+ */
 function parseArgs(argv) {
+  const args = minimist(argv, { string: ['region'] })
+  if (!args.region) throw new Error('--region is required')
   const opts = { ...DEFAULTS }
-  for (let i = 0; i < argv.length; i += 2) {
-    const key = argv[i].replace(/^--/, '')
-    if (!(key in DEFAULTS)) throw new Error(`unknown option ${argv[i]}`)
-    opts[key] = Number(argv[i + 1])
-    if (!Number.isFinite(opts[key])) throw new Error(`bad value for ${argv[i]}`)
+  for (const key of Object.keys(DEFAULTS)) {
+    if (args[key] === undefined) continue
+    opts[key] = Number(args[key])
+    if (!Number.isFinite(opts[key])) throw new Error(`bad value for --${key}`)
   }
-  return opts
+  return { region: args.region, opts }
+}
+
+const regionDir = (name) => path.join(__dirname, '..', 'data', 'reassess', name)
+
+/**
+ * Pearson correlation of two equal-length samples, or null when either side
+ * has zero variance or there are fewer than 2 points.
+ */
+function pearson(xs, ys) {
+  if (xs.length !== ys.length) throw new Error('pearson: samples differ in length')
+  if (xs.length < 2) return null
+  const mx = xs.reduce((a, b) => a + b, 0) / xs.length
+  const my = ys.reduce((a, b) => a + b, 0) / ys.length
+  let sxy = 0, sxx = 0, syy = 0
+  for (let i = 0; i < xs.length; i++) {
+    const dx = xs[i] - mx
+    const dy = ys[i] - my
+    sxy += dx * dy
+    sxx += dx * dx
+    syy += dy * dy
+  }
+  if (sxx === 0 || syy === 0) return null
+  return sxy / Math.sqrt(sxx * syy)
 }
 
 const url = t => `https://en.wikipedia.org/wiki/${encodeURIComponent(t.replace(/ /g, '_'))}`
@@ -94,15 +118,21 @@ function table(rows, { showTier = true } = {}) {
  * One ranking run: read the four reassess caches from dataDir, write ranking
  * files into outDir, return the rows. Everything the CLI prints is printed
  * here too, so a library caller sees exactly what a run produced.
+ *
+ * The region profile supplies the excluded titles (dropped from the universe
+ * before ranking), the live importance filter (the deployed bot's, the only
+ * honest baseline for the added/dropped diff) and the report's wording.
  * @returns {{ ranked: Array, watchlist: Array, wide: Array }}
  */
-function rank({ dataDir, outDir, opts = { ...DEFAULTS } }) {
+function rank({ dataDir, outDir, opts = { ...DEFAULTS }, profile = loadProfile('sfba') }) {
   const cohort = load(dataDir, 'cohort')
   const candidates = load(dataDir, 'untagged-candidates')
   const proseAll = load(dataDir, 'links-prose-all')
   const redirects = load(dataDir, 'redirects')
 
+  const excluded = new Set(profile.exclude_titles)
   const universe = buildUniverse(cohort, candidates)
+    .filter(u => !excluded.has(u.title))
   const counts = canonicalInlinks(proseAll, redirects, universe.map(u => u.title))
   universe.forEach(u => { u.inlinks = counts[u.title] || 0 })
   // ties broken by title so the output is stable between runs
@@ -117,10 +147,25 @@ function rank({ dataDir, outDir, opts = { ...DEFAULTS } }) {
   const unrated = ranked.filter(r => r.importance === 'unknown')
   const newlyTagged = ranked.filter(r => !r.tagged)
 
+  // Validation: how well does the inlink measure reproduce the human ratings?
+  // SF's published headline (§5.1) is for canonical inlinks; log1p and the
+  // percentile rank bracket it, and none of the three is the transform behind
+  // the published figure.
+  const ratings = rated.map(r => RANK[r.importance])
+  const inlinks = rated.map(r => r.inlinks)
+  const validation = [
+    ['canonical inlinks', pearson(inlinks, ratings)],
+    ['Math.log1p(inlinks)', pearson(inlinks.map(v => Math.log1p(v)), ratings)],
+    ['inlink percentile rank', pearson(percentileRanks(inlinks), ratings)]
+  ]
+  const fmtR = (r) => r === null ? '—' : r.toFixed(3)
+
+  const liveImportance = profile.live_importance
+
   // the bot watchlist: purely the top N of the ranking
   const { narrow: watchlist, wide } = cuts(ranked, opts)
   const currentWatch = new Set(
-    cohort.filter(a => LIVE_IMPORTANCE.includes(a.importance)).map(a => a.title))
+    cohort.filter(a => liveImportance.includes(a.importance)).map(a => a.title))
   const watchNow = new Set(watchlist.map(r => r.title))
   const added = watchlist.filter(r => !currentWatch.has(r.title))
   const dropped = ranked.filter(r => currentWatch.has(r.title) && !watchNow.has(r.title))
@@ -145,14 +190,14 @@ function rank({ dataDir, outDir, opts = { ...DEFAULTS } }) {
     publish(wide.map(r => r.title)))
 
   const pct = (a, b) => `${(100 * a / b).toFixed(0)}%`
-  const md = `# Bay Area article ranking
+  const md = `# ${profile.label} article ranking
 
 Generated by \`scripts/rank.js\` on ${new Date().toISOString().slice(0, 10)}.
 Method: [docs/importance-ranking-methodology.md](../../docs/importance-ranking-methodology.md)
 
 Universe: **${ranked.length}** articles — ${ranked.filter(r => r.tagged).length} already
-tagged, ${newlyTagged.length} Wikidata candidates whose data places them in the nine
-counties via ${IS_HERE_PROPERTIES.join('/')}.
+tagged, ${newlyTagged.length} Wikidata candidates whose data places them in the
+region's ${profile.anchors.length} counties via ${IS_HERE_PROPERTIES.join('/')}.
 
 Ranked by prose links from other articles in the universe, navbox links excluded,
 redirects folded.
@@ -181,13 +226,24 @@ ${newlyTagged.length} articles are not tagged at all; of those,
 ${newlyTagged.filter(r => r.tier !== 'low').length} are proposed above Low and
 warrant human review before being applied.
 
+## Validation against human ratings
+
+Over the ${rated.length} tagged articles rated low/mid/high/top, Pearson r
+between the human rating (0–3) and each transform of canonical inlinks:
+
+| Measure | n | Pearson r |
+|---|---|---|
+${validation.map(([measure, r]) => `| ${measure} | ${rated.length} | ${fmtR(r)} |`).join('\n')}
+
+SF's published r = 0.520 (docs/importance-ranking-methodology.md §5.1); the inlink transform behind that figure is not recorded.
+
 ## Newly tagged, proposed above Low
 
 ${table(newlyTagged.filter(r => r.tier !== 'low'))}
 ## Top ${opts.watchlist} — the bot watchlist
 
 Currently the bot watches **${currentWatch.size}** articles: everything rated
-${LIVE_IMPORTANCE.map(i => i[0].toUpperCase() + i.slice(1)).join(', ')}.
+${liveImportance.map(i => i[0].toUpperCase() + i.slice(1)).join(', ')}.
 Switching to the top ${opts.watchlist} of this ranking would **add ${added.length}**
 and **drop ${dropped.length}** — a deliberate reduction in coverage, not a swap.
 
@@ -221,12 +277,13 @@ ${table(dropped)}`
 }
 
 function main() {
-  const opts = parseArgs(process.argv.slice(2))
-  rank({ dataDir: DATA_DIR, outDir: DATA_DIR, opts })
+  const { region: name, opts } = parseArgs(process.argv.slice(2))
+  const dir = regionDir(name)
+  rank({ dataDir: dir, outDir: dir, opts, profile: loadProfile(name) })
 }
 
 if (require.main === module) {
   try { main() } catch (error) { console.error(error.message); process.exit(1) }
 }
 
-module.exports = { rank, parseArgs, DEFAULTS, LIVE_IMPORTANCE, cuts }
+module.exports = { rank, parseArgs, pearson, DEFAULTS, cuts }

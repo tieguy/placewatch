@@ -3,7 +3,8 @@ const fs = require('fs')
 const os = require('os')
 const path = require('path')
 
-const { rank, DEFAULTS } = require('../scripts/rank')
+const { rank, pearson, DEFAULTS } = require('../scripts/rank')
+const { loadProfile } = require('../scripts/region-profile')
 
 const INPUT = path.join(__dirname, 'fixtures', 'rank', 'input')
 const GOLDEN = path.join(__dirname, 'fixtures', 'rank', 'golden')
@@ -36,14 +37,15 @@ describe('rank', function() {
 
   before(function() {
     outDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sfedits-rank-'))
-    result = rank({ dataDir: INPUT, outDir, opts: { ...DEFAULTS, watchlist: 5, wide: 10 } })
+    result = rank({ dataDir: INPUT, outDir, opts: { ...DEFAULTS, watchlist: 5, wide: 10 },
+      profile: loadProfile('sfba') })
   })
 
   after(function() {
     fs.rmSync(outDir, { recursive: true, force: true })
   })
 
-  it('reproduces the original rank.js on the fixture caches', function() {
+  it('golden test still passes with the sfba profile', function() {
     const actual = JSON.parse(fs.readFileSync(path.join(outDir, 'ranking.json'), 'utf8'))
     const golden = JSON.parse(fs.readFileSync(path.join(GOLDEN, 'ranking.json'), 'utf8'))
     assert.deepEqual(actual.map(r => r.title), golden.map(r => r.title),
@@ -96,5 +98,49 @@ describe('rank', function() {
     assert.equal(watchlist.length, 5)
     assert.equal(wide.length, 10)
     assert.deepEqual(watchlist.map(r => r.title), titles.slice(0, 5))
+  })
+
+  it('exclude_titles removes a title from the ranking', function() {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sfedits-rank-'))
+    try {
+      const profile = { ...loadProfile('sfba'), exclude_titles: ['Golden Gate Bridge'] }
+      const { ranked } = rank({ dataDir: INPUT, outDir: dir,
+        opts: { ...DEFAULTS, watchlist: 5, wide: 10 }, profile })
+      assert.notInclude(ranked.map(r => r.title), 'Golden Gate Bridge',
+        'the excluded title must not rank')
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('pearson: perfect, inverse and degenerate inputs', function() {
+    assert.equal(pearson([1, 2, 3], [2, 4, 6]), 1)
+    assert.equal(pearson([1, 2, 3], [3, 2, 1]), -1)
+    assert.isNull(pearson([1, 1, 1], [1, 2, 3]))
+  })
+
+  it('report includes the validation section', function() {
+    const md = fs.readFileSync(path.join(outDir, 'ranking-report.md'), 'utf8')
+    assert.include(md, '## Validation against human ratings')
+    assert.include(md, 'r = 0.520')
+  })
+
+  it('report names the region, not the Bay Area', function() {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sfedits-rank-'))
+    try {
+      // the fixture universe contains real titles like "Bay Area Rapid
+      // Transit", so what must go is the Bay Area *branding*: the header
+      // and the "nine counties" phrase, not the article names
+      const profile = { ...loadProfile('sfba'), label: 'Testville' }
+      rank({ dataDir: INPUT, outDir: dir, opts: { ...DEFAULTS, watchlist: 5, wide: 10 },
+        profile })
+      const md = fs.readFileSync(path.join(dir, 'ranking-report.md'), 'utf8')
+      assert.equal(md.slice(0, md.indexOf('\n')), '# Testville article ranking')
+      assert.include(md, 'Testville')
+      assert.notInclude(md, 'Bay Area article ranking')
+      assert.notInclude(md, 'nine counties')
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true })
+    }
   })
 })
