@@ -53,14 +53,19 @@ describe('reassess-untagged', function() {
     // Cache hits for every claims-independent stage keep the run offline;
     // the skip rule alone decides claims and report (report reads claims).
     beforeEach(function() {
-      if (fs.existsSync(miamiDir)) this.skip()  // never clobber a real Miami run
+      // this.skip() does NOT stop afterEach from running, so cleanup below
+      // is gated on this flag - otherwise rmSync deletes a real Miami cache.
+      if (fs.existsSync(miamiDir)) this.skip()  // never run against a real Miami run
       fs.mkdirSync(miamiDir, { recursive: true })
+      this.createdMiamiDir = true
       for (const name of ['cohort', 'untagged-candidates', 'untagged-links',
         'untagged-assessments', 'untagged-leads']) {
         fs.writeFileSync(path.join(miamiDir, `${name}.json`), '[]')
       }
     })
-    afterEach(function() { fs.rmSync(miamiDir, { recursive: true, force: true }) })
+    afterEach(function() {
+      if (this.createdMiamiDir) fs.rmSync(miamiDir, { recursive: true, force: true })
+    })
 
     it("stops after links, skipping everything claims-onward", function() {
       const out = spawnSync('node',

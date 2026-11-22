@@ -114,14 +114,19 @@ describe('reassess', function() {
     // as a cache hit and never touches the network; the skip rule is then
     // the only thing standing between the run and claims/score/report.
     beforeEach(function() {
-      if (fs.existsSync(miamiDir)) this.skip()  // never clobber a real Miami run
+      // this.skip() does NOT stop afterEach from running, so cleanup below
+      // is gated on this flag - otherwise rmSync deletes a real Miami cache.
+      if (fs.existsSync(miamiDir)) this.skip()  // never run against a real Miami run
       fs.mkdirSync(miamiDir, { recursive: true })
+      this.createdMiamiDir = true
       for (const stage of ['cohort', 'qids', 'links', 'links-prose',
         'links-prose-all', 'redirects', 'assessments', 'leads', 'denoms']) {
         fs.writeFileSync(path.join(miamiDir, `${stage}.json`), '[]')
       }
     })
-    afterEach(function() { fs.rmSync(miamiDir, { recursive: true, force: true }) })
+    afterEach(function() {
+      if (this.createdMiamiDir) fs.rmSync(miamiDir, { recursive: true, force: true })
+    })
 
     it("stops after redirects, skipping everything claims-onward", function() {
       const out = spawnSync('node', ['scripts/reassess.js', '--region', 'miami', 'all'],
