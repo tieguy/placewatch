@@ -123,14 +123,16 @@ describe('reassess', function() {
     })
     afterEach(function() { fs.rmSync(miamiDir, { recursive: true, force: true }) })
 
-    it("skips claims, score and report and ends cleanly", function() {
+    it("stops after redirects, skipping everything claims-onward", function() {
       const out = spawnSync('node', ['scripts/reassess.js', '--region', 'miami', 'all'],
         { cwd: repo, encoding: 'utf8' })
       assert.equal(out.status, 0, out.stderr)
       assert.include(out.stdout,
-        'region "miami" has no claim_targets; skipping claims, score and report — run scripts/rank.js for the ranking')
-      // one line total, and the claims-dependent stages never ran
+        'region "miami" has no claim_targets; skipping claims, assessments, leads, denoms, score and report — run scripts/rank.js for the ranking')
+      // one line total, and nothing after redirects runs - not even as a
+      // cache hit (their caches are seeded, so a wrong fix would show lines)
       assert.lengthOf(out.stdout.match(/has no claim_targets; skipping/g), 1)
+      assert.notMatch(out.stdout, /(^|\n)(claims|assessments|leads|denoms|score|report):/)
       assert.notInclude(out.stdout, 'missing stage caches')
       assert.notInclude(out.stdout, 'run the score stage first')
     })

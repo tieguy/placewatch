@@ -332,16 +332,18 @@ async function main() {
   }
   setRegion(loadProfile(parsed.region))
   const toRun = parsed.stage === 'all' ? Object.keys(STAGES) : [parsed.stage]
-  // report reads the claims cache; without claim_targets neither can run,
-  // and 'all' still ends cleanly
-  const { skipped, line } = noClaimTargetsSkip(parsed.stage, ['claims', 'report'])
+  // The ranking needs only candidates and links; without claim_targets,
+  // claims cannot run and everything after it only feeds report - so 'all'
+  // stops after links and still ends cleanly
+  const { skipped, line } = noClaimTargetsSkip(parsed.stage,
+    ['claims', 'assessments', 'leads', 'report'])
   for (const stage of toRun) {
-    if (parsed.stage === 'all' && stage !== 'report' && loadCache(stage)) {
-      console.log(`${stage}: cached, skipping`)
-      continue
-    }
     if (skipped.includes(stage)) {
       if (line && stage === skipped[0]) console.log(line)
+      continue
+    }
+    if (parsed.stage === 'all' && stage !== 'report' && loadCache(stage)) {
+      console.log(`${stage}: cached, skipping`)
       continue
     }
     console.log(`${stage}:`)

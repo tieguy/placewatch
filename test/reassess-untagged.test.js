@@ -62,14 +62,17 @@ describe('reassess-untagged', function() {
     })
     afterEach(function() { fs.rmSync(miamiDir, { recursive: true, force: true }) })
 
-    it("skips claims and report and ends cleanly", function() {
+    it("stops after links, skipping everything claims-onward", function() {
       const out = spawnSync('node',
         ['scripts/reassess-untagged.js', '--region', 'miami', 'all'],
         { cwd: repo, encoding: 'utf8' })
       assert.equal(out.status, 0, out.stderr)
       assert.include(out.stdout,
-        'region "miami" has no claim_targets; skipping claims and report — run scripts/rank.js for the ranking')
+        'region "miami" has no claim_targets; skipping claims, assessments, leads and report — run scripts/rank.js for the ranking')
+      // one line total, and nothing after links runs - not even as a cache
+      // hit (their caches are seeded, so a wrong fix would show lines)
       assert.lengthOf(out.stdout.match(/has no claim_targets; skipping/g), 1)
+      assert.notMatch(out.stdout, /(^|\n)(claims|assessments|leads|report):/)
       assert.notInclude(out.stdout, 'missing untagged stage caches')
     })
 

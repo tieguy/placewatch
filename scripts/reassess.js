@@ -923,11 +923,13 @@ function parseCli(argv, stages = STAGES) {
 
 /**
  * For an `all` run in a region without claim_targets: claims cannot run, and
- * every stage that reads its cache transitively cannot follow. Returns the
- * stages to skip and the ONE log line that says so; `skipStages` is the
- * caller's claims-dependent set. Any other run - a single stage, or a region
- * WITH claim_targets - skips nothing, and a direct claims invocation still
- * throws in loadTargets().
+ * the stages after it exist only to feed the reassessment score and report
+ * (score reads the claims cache; assessments/leads/denoms feed score). The
+ * ranking that `all` is really for needs just the stages BEFORE claims, so
+ * `all` stops there. Returns the stages to skip and the ONE log line that
+ * says so; `skipStages` is the caller's claims-onward set. Any other run -
+ * a single stage, or a region WITH claim_targets - skips nothing, and a
+ * direct claims invocation still throws in loadTargets().
  */
 function noClaimTargetsSkip(stageArg, skipStages, { name, claimTargets } = region()) {
   if (stageArg !== 'all' || claimTargets) return { skipped: [], line: null }
@@ -951,17 +953,19 @@ async function main() {
   }
   setRegion(loadProfile(parsed.region))
   const toRun = parsed.stage === 'all' ? Object.keys(STAGES) : [parsed.stage]
-  // score reads the claims cache and report reads score; without
-  // claim_targets none of the three can run, and 'all' still ends cleanly
-  const { skipped, line } = noClaimTargetsSkip(parsed.stage, ['claims', 'score', 'report'])
+  // The ranking needs only the stages through redirects; without
+  // claim_targets, claims cannot run and everything after it only feeds
+  // score/report - so 'all' stops after redirects and still ends cleanly
+  const { skipped, line } = noClaimTargetsSkip(parsed.stage,
+    ['claims', 'assessments', 'leads', 'denoms', 'score', 'report'])
   for (const stage of toRun) {
+    if (skipped.includes(stage)) {
+      if (line && stage === skipped[0]) console.log(line)
+      continue
+    }
     // 'all' skips completed stages; report is cheap enough to always rebuild
     if (parsed.stage === 'all' && stage !== 'report' && loadCache(stage)) {
       console.log(`${stage}: cached, skipping`)
-      continue
-    }
-    if (skipped.includes(stage)) {
-      if (line && stage === skipped[0]) console.log(line)
       continue
     }
     console.log(`${stage}:`)
