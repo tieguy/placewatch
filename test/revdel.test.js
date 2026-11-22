@@ -6,7 +6,7 @@ const path = require('path')
 
 const nock = require('nock')
 const { extractRevisionInfo, recordPost, loadActive, updateEntries, entryDeliveries } = require('../lib/post-log')
-const { classifyRevisions, decideActions, deletePosts } = require('../lib/revdel-check')
+const { classifyRevisions, decideActions, deletePosts, sweep, accountForEntry } = require('../lib/revdel-check')
 
 describe('post-log', function() {
   let logFile
@@ -544,6 +544,147 @@ describe('revdel-check', function() {
         assert.isTrue(updated2.deliveries[1].deleted, 'Discord should still be marked deleted')
         assert.equal(updated2.status, 'deleted', 'Entry should be marked deleted after retry succeeds')
       })
+    })
+  })
+
+  describe('accountForEntry', function() {
+    it('accountForEntry: no account field → accounts[0]; "miami" → the miami account; unknown → null', function() {
+      const sf = { discord: { webhook_url: 'https://discord.com/api/webhooks/100/sf-token' } }
+      const miami = { id: 'miami', discord: { webhook_url: 'https://discord.com/api/webhooks/200/miami-token' } }
+      const accounts = [sf, miami]
+
+      assert.strictEqual(
+        accountForEntry({ host: 'en.wikipedia.org', revId: 1 }, accounts),
+        sf, 'entries without an account field belong to accounts[0]')
+      assert.strictEqual(
+        accountForEntry({ host: 'en.wikipedia.org', revId: 1, account: 'miami' }, accounts),
+        miami, 'an account field resolves to the account with that id')
+      assert.isNull(
+        accountForEntry({ host: 'en.wikipedia.org', revId: 1, account: 'gone' }, accounts),
+        'an unknown account id resolves to null')
+    })
+  })
+
+  describe('sweep: one sweeper, per-account credentials', function() {
+    const SF_WEBHOOK = 'https://discord.com/api/webhooks/100/sf-token'
+    const MIAMI_WEBHOOK = 'https://discord.com/api/webhooks/200/miami-token'
+    const sfAccount = { discord: { webhook_url: SF_WEBHOOK } }
+    const miamiAccount = { id: 'miami', discord: { webhook_url: MIAMI_WEBHOOK } }
+
+    let logFile
+
+    beforeEach(function() {
+      logFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'revdel-sweep-')), 'posted-log.jsonl')
+      require('../lib/mw-api')._resetSessions()
+    })
+
+    afterEach(function() {
+      fs.rmSync(path.dirname(logFile), { recursive: true, force: true })
+      nock.cleanAll()
+    })
+
+    function writeEntries(entries) {
+      fs.writeFileSync(logFile, entries.map(e => JSON.stringify(e)).join('\n') + '\n')
+    }
+
+    function readEntries() {
+      return fs.readFileSync(logFile, 'utf8')
+        .split('\n')
+        .filter(Boolean)
+        .map(line => JSON.parse(line))
+    }
+
+    // Wiki API reply classifying revId as hidden (RevisionDelete).
+    function hiddenRevision(revId) {
+      return nock('https://en.wikipedia.org')
+        .get('/w/api.php')
+        .query(true)
+        .reply(200, {
+          batchcomplete: true,
+          query: { pages: [{ revisions: [{ revid: revId, texthidden: true }] }] }
+        })
+    }
+
+    function activeEntry(revId, postId, account) {
+      const entry = {
+        host: 'en.wikipedia.org',
+        revId,
+        page: 'Cat',
+        postedAt: new Date().toISOString(),
+        status: 'active',
+        missingCount: 0,
+        deliveries: [{ type: 'discord', postId, deleted: false }]
+      }
+      if (account !== undefined) entry.account = account
+      return entry
+    }
+
+    it('legacy entry without account is swept as accounts[0]', async function() {
+      const apiScope = hiddenRevision(100)
+      const deleteScope = nock('https://discord.com')
+        .delete('/api/webhooks/100/sf-token/messages/msg-sf-100')
+        .reply(204)
+
+      writeEntries([activeEntry(100, 'msg-sf-100')])
+
+      await sweep([sfAccount, miamiAccount], logFile, null)
+
+      assert.isTrue(apiScope.isDone(), 'the wiki API must have been queried')
+      assert.isTrue(deleteScope.isDone(), "the DELETE must hit accounts[0]'s webhook")
+      assert.equal(readEntries()[0].status, 'deleted')
+    })
+
+    it('two accounts, same revision, both deleted with their own credentials', async function() {
+      hiddenRevision(200)
+      // Each interceptor fires at most once, so isDone() proves exactly one
+      // DELETE per webhook, with the right credentials.
+      const sfDelete = nock('https://discord.com')
+        .delete('/api/webhooks/100/sf-token/messages/msg-sf-200')
+        .reply(204)
+      const miamiDelete = nock('https://discord.com')
+        .delete('/api/webhooks/200/miami-token/messages/msg-miami-200')
+        .reply(204)
+
+      writeEntries([
+        activeEntry(200, 'msg-sf-200'),
+        activeEntry(200, 'msg-miami-200', 'miami')
+      ])
+
+      await sweep([sfAccount, miamiAccount], logFile, null)
+
+      assert.isTrue(sfDelete.isDone(), 'DELETE on the SF webhook must have happened')
+      assert.isTrue(miamiDelete.isDone(), 'DELETE on the miami webhook must have happened')
+      const entries = readEntries()
+      assert.lengthOf(entries, 2)
+      assert.equal(entries.find(e => e.account === undefined).status, 'deleted')
+      assert.equal(entries.find(e => e.account === 'miami').status, 'deleted')
+    })
+
+    it('an entry naming an unknown account stays active and is retried', async function() {
+      hiddenRevision(300)
+      const anyDelete = nock('https://discord.com')
+        .delete(/.*/)
+        .reply(204)
+
+      writeEntries([activeEntry(300, 'msg-gone-300', 'gone')])
+
+      const errors = []
+      const originalConsoleError = console.error
+      console.error = function(...args) { errors.push(args.join(' ')) }
+
+      try {
+        await sweep([sfAccount, miamiAccount], logFile, null)
+      } finally {
+        console.error = originalConsoleError
+      }
+
+      assert.isFalse(anyDelete.isDone(), 'no DELETE must be attempted for an unknown account')
+      assert.include(
+        errors.join('\n'),
+        '[revdel] No account "gone" in config for en.wikipedia.org:300; ' +
+        'leaving the post up, retrying next sweep')
+      const [entry] = readEntries()
+      assert.equal(entry.status, 'active', 'the entry must stay active for the next sweep')
     })
   })
 })

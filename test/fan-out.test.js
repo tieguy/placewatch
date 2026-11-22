@@ -11,12 +11,14 @@ describe('fan-out', function() {
 
   let screenshotPath
   let renderCount
+  let recordedPosts
 
   beforeEach(function() {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fanout-test-'))
     screenshotPath = path.join(dir, 'diff.png')
     fs.writeFileSync(screenshotPath, 'fake png bytes')
     renderCount = 0
+    recordedPosts = []
   })
 
   afterEach(function() {
@@ -44,7 +46,9 @@ describe('fan-out', function() {
         initializeReader: async () => null,
         enrichIPsInText: async (text) => text
       },
-      './lib/post-log': { recordPost: () => null }
+      './lib/post-log': {
+        recordPost: (entry) => { recordedPosts.push(entry); return null }
+      }
     })
   }
 
@@ -176,6 +180,58 @@ describe('fan-out', function() {
       account, pageWatch.getStatus(edit, edit.user, '{{page}} edited'), edit, [])
 
     assert.isTrue(accountHook.isDone(), 'watched edits still post to the account')
+  })
+
+  it('records the posting account id', async function() {
+    // Which account made a post must land in the posted log, so the revdel
+    // sweeper can later delete with the same account's credentials.
+    const miamiHook = nock('https://discord.com')
+      .post('/api/webhooks/12/miami').query(true).reply(200, { id: '9' })
+    const sfHook = nock('https://discord.com')
+      .post('/api/webhooks/13/sf').query(true).reply(200, { id: '10' })
+
+    const pageWatch = loadPageWatch()
+
+    pageWatch._setTopicStateForTest({ subscriptionsForTopic: async () => [] }, null)
+
+    const edit = {
+      wikipedia: 'English Wikipedia',
+      page: 'Alpha',
+      user: 'Editor',
+      url: 'https://en.wikipedia.org/w/index.php?diff=321&oldid=320'
+    }
+
+    const postAs = async (account) => {
+      // sendStatus deletes the screenshot in its finally block, so put it
+      // back before each call: the stubbed renderer always returns this path.
+      fs.writeFileSync(screenshotPath, 'fake png bytes')
+
+      nock('https://en.wikipedia.org')
+        .get('/w/index.php')
+        .query(true)
+        .reply(200, '<script>RLCONF={"wgPageName":"Alpha"};</script>')
+
+      await pageWatch.sendStatus(
+        account, pageWatch.getStatus(edit, edit.user, '{{page}} edited'), edit, [])
+    }
+
+    await postAs({
+      id: 'miami',
+      discord: { webhook_url: 'https://discord.com/api/webhooks/12/miami' },
+      deliveries: [{ type: 'discord' }],
+      watchlist: { 'English Wikipedia': { 'Alpha': true } }
+    })
+    await postAs({
+      discord: { webhook_url: 'https://discord.com/api/webhooks/13/sf' },
+      deliveries: [{ type: 'discord' }],
+      watchlist: { 'English Wikipedia': { 'Alpha': true } }
+    })
+
+    assert.isTrue(miamiHook.isDone(), 'the miami account must have posted')
+    assert.isTrue(sfHook.isDone(), 'the id-less account must have posted')
+    assert.lengthOf(recordedPosts, 2, 'each successful sendStatus records one entry')
+    assert.equal(recordedPosts[0].account, 'miami')
+    assert.isNull(recordedPosts[1].account)
   })
 
   it('skips rendering when no topic matched and no account platform is set',

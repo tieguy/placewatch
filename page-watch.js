@@ -452,7 +452,7 @@ async function sendStatus(account, statusData, edit, topicIds = [], thread = nul
 
         const recordUrls = edit.collapsedUrls || [edit.url]
         for (const diffUrl of recordUrls) {
-          recordPost({ diffUrl, page: edit.page, deliveries: allDeliveries })
+          recordPost({ diffUrl, page: edit.page, deliveries: allDeliveries, account: account.id || null })
         }
         writeHeartbeat('post')
         return refs
@@ -630,9 +630,10 @@ async function main() {
   return checkConfig(config, function (err) {
     if (!err) {
       // Periodically check posted revisions and delete posts whose
-      // revision has been hidden/suppressed on-wiki
+      // revision has been hidden/suppressed on-wiki. One sweeper covers
+      // every account, each entry with its own account's credentials.
       if (!argv.noop && config.accounts.length > 0) {
-        startSweeper(config.accounts[0], undefined, topicStore)
+        startSweeper(config.accounts, undefined, topicStore)
       }
 
       const wikipedia = new EditStream()
