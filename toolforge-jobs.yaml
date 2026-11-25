@@ -38,7 +38,7 @@
   mem: 1Gi
   cpu: 1
 
-# Polls the fork's integration branch every 15 minutes and redeploys when it
+# Polls the fork's main branch every 15 minutes and redeploys when it
 # moves. Runs on the tool's own image so that a broken build keeps the *old*
 # autoupdate running — it can still pick up the fix commit that follows.
 #

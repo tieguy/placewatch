@@ -25,7 +25,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 REPO_URL="${SFEDITS_DEPLOY_REPO:-https://github.com/tieguy/sfedits.git}"
-BRANCH="${SFEDITS_DEPLOY_BRANCH:-integration}"
+BRANCH="${SFEDITS_DEPLOY_BRANCH:-main}"
 BOT_JOB="${SFEDITS_BOT_JOB:-bot}"
 # The webservice is not optional any more: public/server.js serves the /create
 # form, so a deploy that only restarts the bot ships new bot code against an old
