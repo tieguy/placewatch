@@ -37,6 +37,11 @@ describe('edit-stream', function() {
       assert.isFalse(toEdit({ ...baseEvent, user: 'NotAnIP' }).anonymous)
     })
 
+    it('counts temporary-account editors as anonymous', function() {
+      assert.isTrue(toEdit({ ...baseEvent, user: '~2026-42504-55' }).anonymous)
+      assert.isTrue(toEdit({ ...baseEvent, user: '~2026-67040' }).anonymous)
+    })
+
     it('maps language wikis to wikichanges feed names', function() {
       assert.equal(toEdit({ ...baseEvent, server_name: 'ko.wikipedia.org' }).wikipedia, 'Korean Wikipedia')
       assert.equal(toEdit({ ...baseEvent, server_name: 'es.wikipedia.org' }).wikipedia, 'Spanish Wikipedia')

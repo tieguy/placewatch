@@ -295,6 +295,17 @@ describe('discord-platform', function() {
       }
     })
 
+    it('omits the thank link for temporary-account editors', function() {
+      for (const name of ['~2026-67040', '~2026-42504-55']) {
+        const links = buildActionLinks({
+          diffUrl: 'https://en.wikipedia.org/w/index.php?diff=9&oldid=8',
+          page: 'Cat',
+          name
+        })
+        assert.notInclude(links, 'Special:Thanks')
+      }
+    })
+
     it('escapes parentheses in URLs used inside markdown links', function() {
       const links = buildActionLinks({
         diffUrl: 'https://en.wikipedia.org/w/index.php?diff=9&oldid=8',
