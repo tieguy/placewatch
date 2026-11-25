@@ -180,6 +180,18 @@ describe('dump-reader fetchBlock', function() {
     assert.include(xml, '<title>A</title>', 'the retried request was decoded')
   })
 
+  it('retries a 5xx without Retry-After instead of failing (wmFetch transport)', async function() {
+    this.timeout(10000)
+    const body = bz2('<page><title>A</title></page>')
+    // A bare 502 has no Retry-After: only wmFetch's 5xx retry/backoff path
+    // can recover it. With throwOnHttpError: false this would fail outright.
+    nock(HOST).get('/dump.xml.bz2').reply(502)
+    nock(HOST).get('/dump.xml.bz2').reply(206, body)
+
+    const xml = await fetchBlock(`${HOST}/dump.xml.bz2`, { start: 0, end: 99 })
+    assert.include(xml, '<title>A</title>', 'the retried request was decoded')
+  })
+
   it('throws a descriptive error for a non-206/200 status', async function() {
     nock(HOST).get('/dump.xml.bz2').reply(404, Buffer.from('not found'))
     try {
