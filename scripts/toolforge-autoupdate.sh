@@ -24,7 +24,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-REPO_URL="${SFEDITS_DEPLOY_REPO:-https://github.com/tieguy/sfedits.git}"
+REPO_URL="${SFEDITS_DEPLOY_REPO:-https://github.com/tieguy/placewatch.git}"
 BRANCH="${SFEDITS_DEPLOY_BRANCH:-main}"
 BOT_JOB="${SFEDITS_BOT_JOB:-bot}"
 # The webservice is not optional any more: public/server.js serves the /create
@@ -70,8 +70,8 @@ case "$WEB_WAIT_TIMEOUT" in
     WEB_WAIT_TIMEOUT=120 ;;
 esac
 # Every request to a Wikimedia-hosted endpoint identifies the operator.
-PROBE_UA_REPO="${SFEDITS_DEPLOY_REPO:-https://github.com/tieguy/sfedits}"
-PROBE_UA="sfedits-autoupdate (${PROBE_UA_REPO%.git}; ${SFEDITS_CONTACT:-luis@lu.is})"
+PROBE_UA_REPO="${SFEDITS_DEPLOY_REPO:-https://github.com/tieguy/placewatch}"
+PROBE_UA="placewatch-autoupdate (${PROBE_UA_REPO%.git}; ${SFEDITS_CONTACT:-luis@lu.is})"
 
 log() { echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] $*"; }
 

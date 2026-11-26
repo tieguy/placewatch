@@ -22,7 +22,7 @@ const createApp = () =>
         client_name: 'anon',
         redirect_uris: 'urn:ietf:wg:oauth:2.0:oob',
         scopes: 'read write follow',
-        website: 'https://github.com/edsu/anon'
+        website: 'https://github.com/tieguy/placewatch'
       }
     },
     function(e, r, body) {

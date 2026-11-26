@@ -1,7 +1,7 @@
 {
-  "name": "sfedits",
-  "description": "Post edits to San Francisco-related Wikipedia articles.",
-  "homepage": "http://github.com/edsu/anon",
+  "name": "placewatch",
+  "description": "Post Wikipedia edits about a place to Bluesky, Mastodon and Discord.",
+  "homepage": "https://github.com/tieguy/placewatch",
   "license": "CC0-1.0",
   "version": "0.1.2",
   "dependencies": {

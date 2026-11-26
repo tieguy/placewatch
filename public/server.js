@@ -109,7 +109,7 @@ async function buildTopics(config, { dataDir }) {
 // run with mount=all — reached via $TOOL_DATA_DIR, since $HOME does not point
 // at the NFS home in build-service containers. Resolved per request so the
 // page always reflects the file and tests can point it elsewhere.
-const REPO_WEB = (process.env.SFEDITS_DEPLOY_REPO || 'https://github.com/tieguy/sfedits.git')
+const REPO_WEB = (process.env.SFEDITS_DEPLOY_REPO || 'https://github.com/tieguy/placewatch.git')
   .replace(/\.git$/, '')
 
 function readChangelog() {
@@ -153,7 +153,7 @@ function renderPage(topics) {
         <a href="${escapeHtml(topics.dynamic.titles_url)}">${escapeHtml(topics.dynamic.titles_url)}</a>.
         Ranked by how many other Bay Area articles link to each one from prose
         - see the
-        <a href="https://github.com/tieguy/sfedits/blob/integration/docs/importance-ranking-methodology.md">method</a>.
+        <a href="https://github.com/tieguy/placewatch/blob/main/docs/importance-ranking-methodology.md">method</a>.
         Refreshed daily; the list changes when the ranking is regenerated.</p>`
     : topics.dynamic ? `<p>${n(topics.dynamic.articles.length)} articles from the
         <strong>${escapeHtml(topics.dynamic.project)}</strong> WikiProject listing${
@@ -219,8 +219,8 @@ ${claimsSection}
      <a href="/api/topics.json">JSON</a> ·
      <a href="/matrix">untagged-article matrix</a> ·
      <a href="/changelog">changelog</a> ·
-     <a href="https://github.com/tieguy/sfedits">source</a> ·
-     a fork of <a href="https://github.com/mrfinnsmith/sfedits">mrfinnsmith/sfedits</a> ·
+     <a href="https://github.com/tieguy/placewatch">source</a> ·
+     descended from <a href="https://github.com/mrfinnsmith/sfedits">mrfinnsmith/sfedits</a> ·
      runs on <a href="https://toolforge.org">Toolforge</a></p>
 </footer>
 </body>
@@ -268,7 +268,7 @@ function renderChangelog(deploys) {
 <body>
 <h1>Changelog</h1>
 <p>Each entry is one automatic deploy of this instance: the autoupdater
-   polls the <a href="${REPO_WEB}/tree/integration">integration branch</a>
+   polls the <a href="${REPO_WEB}/tree/main">main branch</a>
    every 15 minutes and redeploys when it moves, then records what went
    live here.</p>
 ${entries || '<p>No deploys recorded yet - entries appear with the first autoupdate after this page shipped.</p>'}
@@ -379,7 +379,7 @@ ${disabledNotice}
 
 <footer>
   <p><a href="/">what this bot already watches</a> ·
-     <a href="https://github.com/tieguy/sfedits">source</a> ·
+     <a href="https://github.com/tieguy/placewatch">source</a> ·
      runs on <a href="https://toolforge.org">Toolforge</a></p>
 </footer>
 
@@ -636,7 +636,7 @@ app.get('/toolinfo.json', (req, res) => {
     url: 'https://san-francisco-edit-stream.toolforge.org',
     keywords: 'bot, recent changes, san francisco, wikidata',
     author: 'Luis Villa',
-    repository: 'https://github.com/tieguy/sfedits',
+    repository: 'https://github.com/tieguy/placewatch',
     license: 'CC0-1.0'
   })
 })
@@ -741,7 +741,7 @@ if (require.main === module) {
   // bot job does, so the win is the clean stop and the record of it.
   installStopHandlers({ name: 'web', cleanup: () => shutdownCleanly(server) })
 
-  console.log(`Starting sfedits web (pid ${process.pid}, node ${process.version})`)
+  console.log(`Starting placewatch web (pid ${process.pid}, node ${process.version})`)
   console.log('Previous run:', explainPreviousRun(startRun('web')))
 
   // Nothing here runs per-request, so keep the record's uptime and memory

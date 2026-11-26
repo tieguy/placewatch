@@ -150,7 +150,7 @@ describe('dump-reader fetchBlock', function() {
   it('identifies itself with the dump-reader component User-Agent', async function() {
     const body = bz2('<page><title>A</title></page>')
     const scope = nock(HOST)
-      .matchHeader('user-agent', /^sfedits-dump-reader\//)
+      .matchHeader('user-agent', /^placewatch-dump-reader\//)
       .get('/dump.xml.bz2')
       .reply(206, body)
 

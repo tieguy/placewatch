@@ -696,7 +696,7 @@ if (require.main === module) {
   // means something really did go wrong, and the next start explains what.
   installStopHandlers({ name: 'bot', cleanup: shutdownCleanly })
 
-  console.log(`Starting sfedits bot (pid ${process.pid}, node ${process.version})`)
+  console.log(`Starting placewatch bot (pid ${process.pid}, node ${process.version})`)
   console.log('Previous run:', explainPreviousRun(startRun('bot')))
 
   main().catch(error => {

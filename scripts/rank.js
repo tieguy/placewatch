@@ -175,7 +175,7 @@ function rank({ dataDir, outDir, opts = { ...DEFAULTS }, profile = loadProfile('
   // sitting on a webserver detached from the run that produced it.
   const publish = (titles) => JSON.stringify({
     generated_at: new Date().toISOString(),
-    method: 'https://github.com/tieguy/sfedits/blob/integration/docs/importance-ranking-methodology.md',
+    method: 'https://github.com/tieguy/placewatch/blob/main/docs/importance-ranking-methodology.md',
     universe: ranked.length,
     count: titles.length,
     titles

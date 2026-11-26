@@ -351,7 +351,7 @@ describe('mw-api', function() {
           // UA should NOT be the caller's malicious override
           assert.notEqual(ua, 'Mozilla/5.0')
           // UA should be the operator's
-          assert.include(ua, 'sfedits-test-component')
+          assert.include(ua, 'placewatch-test-component')
           return true
         })
         .get('/ua-protected')

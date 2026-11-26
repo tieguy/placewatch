@@ -101,12 +101,12 @@ describe('toolforge-api.js', function () {
   it('build-start posts source_url and ref, prints the build name', async function () {
     respond((r) => r.method === 'POST' && r.url === '/builds/v1/tool/testtool/builds',
       () => ({ json: { new_build: { name: 'testtool-buildpacks-pipelinerun-x1' } } }))
-    const result = await run(['build-start', 'https://github.com/tieguy/sfedits.git', 'integration'])
+    const result = await run(['build-start', 'https://github.com/tieguy/placewatch.git', 'main'])
     expect(result.code).to.equal(0)
     expect(result.stdout.trim()).to.equal('testtool-buildpacks-pipelinerun-x1')
     expect(requests[0].body).to.deep.equal({
-      source_url: 'https://github.com/tieguy/sfedits.git',
-      ref: 'integration'
+      source_url: 'https://github.com/tieguy/placewatch.git',
+      ref: 'main'
     })
   })
 

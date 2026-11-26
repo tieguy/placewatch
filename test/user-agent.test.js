@@ -10,12 +10,12 @@ describe('user-agent', function() {
 
   it('follows the required client/version (contact) library/version format', function() {
     delete process.env.SFEDITS_CONTACT
-    assert.match(userAgent('bot'), /^sfedits-bot\/\d+\.\d+ \(.+\) Node\.js\/\S+$/)
+    assert.match(userAgent('bot'), /^placewatch-bot\/\d+\.\d+ \(.+\) Node\.js\/\S+$/)
   })
 
   it('names the component so traffic can be attributed to a subsystem', function() {
-    assert.include(userAgent('reassess'), 'sfedits-reassess/')
-    assert.include(userAgent('claim-watch'), 'sfedits-claim-watch/')
+    assert.include(userAgent('reassess'), 'placewatch-reassess/')
+    assert.include(userAgent('claim-watch'), 'placewatch-claim-watch/')
   })
 
   it('lets the operator supply their own contact', function() {

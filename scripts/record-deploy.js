@@ -27,7 +27,7 @@ const MAX_ENTRIES = 50
 const MAX_CHANGES = 20
 const FETCH_TIMEOUT_MS = 15000
 
-/** "tieguy/sfedits" from any https/ssh GitHub remote URL. */
+/** "tieguy/placewatch" from any https/ssh GitHub remote URL. */
 function repoSlug(repoUrl) {
   const m = (repoUrl || '').match(/github\.com[:/]([^/]+\/[^/]+?)(?:\.git)?$/)
   return m ? m[1] : null
@@ -96,7 +96,7 @@ async function fetchChanges(repoUrl, oldSha, newSha) {
   const url = `https://api.github.com/repos/${slug}/compare/${oldSha}...${newSha}`
   const res = await fetch(url, {
     headers: {
-      'User-Agent': 'sfedits-record-deploy (https://github.com/tieguy/sfedits)',
+      'User-Agent': 'placewatch-record-deploy (https://github.com/tieguy/placewatch)',
       Accept: 'application/vnd.github+json'
     },
     signal: AbortSignal.timeout(FETCH_TIMEOUT_MS)
@@ -113,7 +113,7 @@ async function main() {
     process.exit(1)
   }
 
-  const repoUrl = process.env.SFEDITS_DEPLOY_REPO || 'https://github.com/tieguy/sfedits.git'
+  const repoUrl = process.env.SFEDITS_DEPLOY_REPO || 'https://github.com/tieguy/placewatch.git'
   // TOOL_DATA_DIR is the tool's NFS home in build-service containers, where
   // $HOME does not point at it; $HOME covers bastion runs.
   const stateDir = process.env.SFEDITS_STATE_DIR ||

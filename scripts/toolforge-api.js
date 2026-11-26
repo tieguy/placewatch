@@ -81,7 +81,7 @@ function request(method, url, body) {
   const options = {
     method,
     headers: {
-      'User-Agent': `${toolName()}:sfedits-autoupdate`,
+      'User-Agent': `${toolName()}:placewatch-autoupdate`,
       Accept: 'application/json',
       ...(payload ? { 'Content-Type': 'application/json' } : {})
     },

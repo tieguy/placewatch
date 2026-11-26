@@ -18,9 +18,9 @@ describe('deploy changelog', function() {
 
   describe('repoSlug', function() {
     it('extracts owner/repo from https and ssh remotes', function() {
-      assert.equal(repoSlug('https://github.com/tieguy/sfedits.git'), 'tieguy/sfedits')
-      assert.equal(repoSlug('https://github.com/tieguy/sfedits'), 'tieguy/sfedits')
-      assert.equal(repoSlug('git@github.com:tieguy/sfedits.git'), 'tieguy/sfedits')
+      assert.equal(repoSlug('https://github.com/tieguy/placewatch.git'), 'tieguy/placewatch')
+      assert.equal(repoSlug('https://github.com/tieguy/placewatch'), 'tieguy/placewatch')
+      assert.equal(repoSlug('git@github.com:tieguy/placewatch.git'), 'tieguy/placewatch')
     })
 
     it('returns null for non-GitHub URLs', function() {
